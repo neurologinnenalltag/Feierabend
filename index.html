@@ -113,9 +113,9 @@
     <ol id="scoreList" hidden></ol>
     <p class="rules" id="rules">
       Finger oder Maus steuert den Trupp, geschossen wird von allein.<br><br>
-      <b>Jedes Tor hat eine Panzerung.</b> Schieß sie weg: Grün bringt dann Verstärkung,
-      <span class="bad">Rot verschwindet als Gefahr</span>. Wer nicht schießt, muss ausweichen –
-      ein intaktes rotes Tor kostet beim Durchlaufen Soldaten.<br><br>
+      <b>Grüne Tore freischießen</b> – erst wenn die Panzerung durch ist, rückt die Verstärkung ein.
+      <span class="bad">Rote Tore niemals beschießen:</span> zerschießt du sie, zündet die Ladung
+      sofort im eigenen Trupp. Durchlaufen kostet genauso. Rot heißt: Feuer einstellen und ausweichen.<br><br>
       Zombies beißen sich am Trupp fest und fressen ihn auf. Solange sie dranhängen,
       steht ihr still. <span class="bad">Stacheln töten jeden Soldaten, der darüberläuft.</span>
     </p>
@@ -381,7 +381,7 @@ function reset(){
   zombies=[]; bullets=[]; gates=[]; crates=[]; parts=[]; floats=[]; dying=[]; decals=[]; fallen=[]; casings=[];
   traps=[]; boss=null; bossShots=[]; bossIdx=0; nextBoss=650; warnT=0;
   clouds=[]; for(let i=0;i<4;i++) clouds.push({x:rnd(0,1),y:rnd(.02,.16),w:rnd(.2,.4),v:rnd(.004,.012)});
-  nextGate=5; nextWave=135; nextCrate=300; nextTrap=250;
+  nextGate=5; nextWave=135; nextCrate=210; nextTrap=250;
   syncHud();
 }
 function syncHud(){
@@ -416,26 +416,40 @@ function makePanel(good, tier){
     const v=Math.round(rnd(3,6+tier*2));
     return { op:'+', v:v, hits:0, need:5+v*2, good:true };
   }
-  if(Math.random()<.32) return { op:'/', v:2, hits:0, need:26, good:false };
+  // Rote Tore sind stark gepanzert: Streufeuer allein zündet sie nicht,
+  // aber wer draufhält, jagt sich die Ladung selbst in den Trupp.
+  if(Math.random()<.32) return { op:'/', v:2, hits:0, need:48, good:false };
   const v=Math.round(rnd(6,12+tier*3));
-  return { op:'-', v:v, hits:0, need:6+Math.round(v*1.6), good:false };
+  return { op:'-', v:v, hits:0, need:22+v*3, good:false };
 }
 function spawnGate(){
   const tier=dist/650;
-  if(dist>250 && Math.random()<.45){
-    const w=rnd(4.2,5.4);
-    const x0=rnd(-ROAD+.4, ROAD-.4-w);
-    const good=Math.random()<.45;
-    gates.push({ z:SPAWN_Z, done:false, panels:[{x0:x0, x1:x0+w, p:makePanel(good,tier)}] });
+  const r=Math.random();
+  const panels=[];
+  if(r<.40){
+    // reines Verstärkungstor, breit und lohnend
+    const w=rnd(4.5,6.0), x0=rnd(-ROAD+.4, ROAD-.4-w);
+    panels.push({x0:x0, x1:x0+w, p:makePanel(true,tier)});
+  }else if(r<.75){
+    // Verstärkung plus schmale rote Sperre daneben: die Gasse muss man finden
+    const gw=rnd(4.0,5.2), rw=rnd(2.6,3.8);
+    if(Math.random()<.5){
+      const gx=-ROAD+rnd(.3,1.0);
+      panels.push({x0:gx, x1:gx+gw, p:makePanel(true,tier)});
+      const rx=Math.min(ROAD-rw-.3, gx+gw+rnd(1.0,2.2));
+      panels.push({x0:rx, x1:rx+rw, p:makePanel(false,tier)});
+    }else{
+      const rx=-ROAD+rnd(.3,1.0);
+      panels.push({x0:rx, x1:rx+rw, p:makePanel(false,tier)});
+      const gx=Math.min(ROAD-gw-.3, rx+rw+rnd(1.0,2.2));
+      panels.push({x0:gx, x1:gx+gw, p:makePanel(true,tier)});
+    }
   }else{
-    const a=makePanel(true,tier);
-    const b=makePanel(Math.random()<.22, tier);
-    const left=Math.random()<.5;
-    gates.push({ z:SPAWN_Z, done:false, panels:[
-      { x0:-ROAD, x1:0, p:left?a:b },
-      { x0:0, x1:ROAD, p:left?b:a },
-    ]});
+    // reine Sperre: schmales rotes Band, links und rechts bleibt Platz
+    const w=rnd(3.0,4.4), x0=rnd(-ROAD+.4, ROAD-.4-w);
+    panels.push({x0:x0, x1:x0+w, p:makePanel(false,tier)});
   }
+  gates.push({ z:SPAWN_Z, done:false, panels:panels });
 }
 let zid=0;
 function spawnWave(){
@@ -457,7 +471,7 @@ function spawnWave(){
 }
 function spawnCrate(){
   // Waffen kommen bewusst spät: viel HP, große Abstände
-  const hp=30+Math.floor(dist/70);
+  const hp=22+Math.floor(dist/110);
   crates.push({x:rnd(-3.5,3.5),z:SPAWN_Z,hp:hp,max:hp,hit:0});
 }
 
@@ -517,7 +531,7 @@ function update(dt){
 
   if(dist>nextGate){ spawnGate(); nextGate+=rnd(100,150); }
   if(dist>nextWave){ spawnWave(); nextWave+=Math.max(24, rnd(55,80)-dist/30) * (boss?1.8:1); }
-  if(dist>nextCrate && weap<WEAPONS.length-1){ spawnCrate(); nextCrate+=rnd(340,430); }
+  if(dist>nextCrate && weap<WEAPONS.length-1){ spawnCrate(); nextCrate+=rnd(250,320); }
   if(dist>nextTrap){ spawnTrap(); nextTrap+=Math.max(55, rnd(115,165)-dist/30); }
   if(dist>nextBoss && !boss){ spawnBoss(); nextBoss+=rnd(780,980); }
   warnT=Math.max(0,warnT-dt);
@@ -923,15 +937,18 @@ function hitPanel(g,pi,hx){
   p.hits++;
   parts.push({x:hx,z:g.z,t:.2,r:.45,c:p.good?'#B9FFDD':'#FF8A73',kind:'spark'});
   if(p.hits<p.need) return;
-  // Panzerung durch: das Tor zerspringt
+  // Panzerung durch: das Tor zerspringt und löst seine Wirkung sofort aus
   const gx=(pa.x0+pa.x1)/2;
   if(p.good){
     openGate(p,gx,g.z);
-  }else{
-    SFX.tickBad();
-    floats.push({x:gx,z:Math.max(g.z,1),t:1.0,txt:'ZERSTÖRT',c:'#FF9C8A'});
     for(let k=0;k<22;k++)
-      parts.push({x:gx+rnd(-2,2),z:g.z+rnd(-.8,.8),t:rnd(.25,.7),r:rnd(.2,.7),c:k%2?'#FF8A73':'#E8462B',kind:'shard'});
+      parts.push({x:gx+rnd(-2,2),z:g.z+rnd(-.8,.8),t:rnd(.25,.7),r:rnd(.2,.7),c:k%2?'#B9FFDD':'#56E39F',kind:'shard'});
+  }else{
+    // Ins eigene Fleisch geschnitten: der Verlust trifft sofort, ohne Durchlaufen
+    shake=Math.max(shake,.45);
+    for(let k=0;k<26;k++)
+      parts.push({x:gx+rnd(-2,2),z:g.z+rnd(-.8,.8),t:rnd(.25,.8),r:rnd(.25,.8),c:k%2?'#FF8A73':'#E8462B',kind:'shard'});
+    applyOp(p,'DURCHGEBRANNT');
   }
   g.panels.splice(pi,1);
   if(!g.panels.length) g.done=true;
@@ -951,7 +968,7 @@ function openGate(p,gx,gz){
   syncHud();
 }
 
-function applyOp(p){
+function applyOp(p,label){
   const before=squad;
   let next=squad;
   if(p.op==='+') next=squad+p.v;
@@ -966,8 +983,9 @@ function applyOp(p){
   if(next<before) dropSoldiers(before-next);
   squad=next;
   const d=squad-before;
+  if(label) floats.push({x:squadX,z:2.2,t:1.2,txt:label,c:'#FF9C8A'});
   floats.push({x:squadX,z:1.4,t:.9,txt:(d>=0?'+':'')+d,c:d>=0?'#56E39F':'#E8462B'});
-  if(d>=0) SFX.gateGood(); else { SFX.gateBad(); shake=.25; }
+  if(d>=0) SFX.gateGood(); else { SFX.gateBad(); shake=Math.max(shake,.25); }
   syncHud();
   if(squad<=0) gameOver();
 }
@@ -1411,10 +1429,15 @@ function drawGate(g){
     ctx.fillText(sym+pa.p.v,(x0+x1)/2,(yt+yb)/2-((yb-yt)*.06));
     ctx.font='700 '+Math.max(7,.36*PPU*s)+'px system-ui,sans-serif';
     const left=Math.max(0,pa.p.need-pa.p.hits);
-    ctx.fillStyle=good?'rgba(185,255,221,.85)':'rgba(255,199,187,.85)';
-    ctx.fillText(left+' TREFFER',(x0+x1)/2,yb-(yb-yt)*.14);
-    if(!good){
-      ctx.fillStyle='rgba(255,199,187,.75)';
+    if(good){
+      ctx.fillStyle='rgba(185,255,221,.85)';
+      ctx.fillText(left+' TREFFER',(x0+x1)/2,yb-(yb-yt)*.14);
+    }else{
+      // Bei Rot ist der Balken eine Zündanzeige, kein Fortschritt
+      const p2=Math.min(1,pa.p.hits/pa.p.need);
+      ctx.fillStyle= p2>.5 ? 'rgba(255,150,130,'+(0.6+Math.sin(tAcc*12)*.4)+')' : 'rgba(255,199,187,.8)';
+      ctx.fillText(p2>.02 ? 'ZÜNDET IN '+left : 'NICHT BESCHIESSEN',(x0+x1)/2,yb-(yb-yt)*.14);
+      ctx.fillStyle='rgba(255,199,187,.7)';
       ctx.fillText('NICHT DURCHLAUFEN',(x0+x1)/2,yt+(yb-yt)*.14);
     }
   }
@@ -1765,7 +1788,7 @@ function gameOver(reason){
   const isNew = qualifies(m) && (!scores.length || m>scores[0].m);
   kickEl.textContent='Der Trupp ist aufgefressen';
   titleEl.innerHTML='Aufgefressen<em>bei Meter '+m+'</em>';
-  rulesEl.innerHTML='Tipp: <b>Tore lassen sich alle wegschießen</b> – grün für Verstärkung, rot um die Gefahr loszuwerden. <span class="bad">Stacheln töten genau den Teil des Trupps, der darüberläuft.</span>';
+  rulesEl.innerHTML='Tipp: <span class="bad">rote Tore zerschießen kostet dich Soldaten</span> – dran vorbei statt draufhalten. <b>Grüne Tore</b> dagegen lohnen jeden Schuss.';
   scoreEl.hidden=false; scoreEl.textContent=m+' m';
   bestEl.hidden=false;
   bestEl.innerHTML = isNew
