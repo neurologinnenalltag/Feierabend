@@ -112,11 +112,12 @@
     <div class="listTitle" id="listTitle" hidden>Top 10</div>
     <ol id="scoreList" hidden></ol>
     <p class="rules" id="rules">
-      Finger oder Maus steuert den Trupp, geschossen wird von allein.<br><br>
+      Finger oder Maus steuert den Trupp, geschossen wird von allein.
+      <b>Kein Zombie darf durchkommen</b> – erreicht einer den unteren Rand, ist Schluss.
+      Kommt die Horde näher, bremst der Trupp automatisch ab; ist die Bahn frei, geht es schneller voran.<br><br>
       <b>Grüne Tore</b> werden durch Beschuss besser –
       <span class="bad">rote Tore werden durch Beschuss schlimmer.</span>
-      Also: grün anvisieren, rot ausweichen und <b>nicht draufhalten</b>.
-      Grüne Kisten bringen die nächste Waffe.
+      <span class="bad">Fallen schaden deinem Trupp genauso wie den Zombies.</span>
     </p>
     <button class="cta" id="btn">Losrennen</button>
   </div>
@@ -360,6 +361,8 @@ const WEAPONS = [
 
 // ================================================================ State
 const SQUAD_CAP=99, GATE_GAIN_CAP=20;
+const MAX_STRAFE=6.2;      // maximale Seitwärtsgeschwindigkeit in Metern/Sekunde
+const OVERRUN_Z=-1.3;      // ab hier hat ein Zombie den unteren Bildschirmrand erreicht
 // Boss-Typen: jeder hat ein eigenes Angriffsmuster
 const BOSSES=[
   { kind:'brute',   name:'DER KOLOSS',      col:'#8C3B2E', head:'#B85A45', hpF:34, hpD:38 },
@@ -368,18 +371,18 @@ const BOSSES=[
   { kind:'runner',  name:'DER RASENDE',     col:'#2E5C6E', head:'#4E93A8', hpF:26, hpD:48 },
 ];
 let state='menu';
-let squad, weap, dist, speed, squadX, targetX, shake, fireT, flashT;
+let squad, weap, dist, speed, squadX, targetX, shake, fireT, flashT, pressure, overrunT;
 let zombies, bullets, gates, crates, parts, floats, dying, decals, clouds, fallen;
 let traps, boss, bossShots, bossIdx, nextBoss, warnT;
 let nextGate, nextWave, nextCrate, nextTrap;
 
 function reset(){
-  squad=1; weap=0; dist=0; speed=15;
+  squad=3; weap=0; dist=0; speed=15; pressure=1; overrunT=0;
   squadX=0; targetX=0; shake=0; fireT=0; flashT=0;
   zombies=[]; bullets=[]; gates=[]; crates=[]; parts=[]; floats=[]; dying=[]; decals=[]; fallen=[];
   traps=[]; boss=null; bossShots=[]; bossIdx=0; nextBoss=650; warnT=0;
   clouds=[]; for(let i=0;i<4;i++) clouds.push({x:rnd(0,1),y:rnd(.02,.16),w:rnd(.2,.4),v:rnd(.004,.012)});
-  nextGate=50; nextWave=70; nextCrate=260; nextTrap=170;
+  nextGate=5; nextWave=115; nextCrate=300; nextTrap=250;
   syncHud();
 }
 function syncHud(){
@@ -419,7 +422,7 @@ function makePanel(good, tier){
 }
 function spawnGate(){
   const tier=dist/650;
-  if(Math.random()<.45){
+  if(dist>250 && Math.random()<.45){
     const w=rnd(4.2,5.4);
     const x0=rnd(-ROAD+.4, ROAD-.4-w);
     const good=Math.random()<.45;
@@ -443,12 +446,12 @@ function spawnWave(){
       id:++zid,
       x:rnd(-ROAD+.8,ROAD-.8),
       z:SPAWN_Z+Math.floor(i/5)*3.0+rnd(0,1.4),
-      hp:hp,max:hp,big:false,sp:rnd(6,9),ph:Math.random()*6.28,hit:0
+      hp:hp,max:hp,big:false,sp:rnd(2.6,4.4),ph:Math.random()*6.28,hit:0,atkCd:.35
     });
   }
   if(dist>300 && Math.random()<.35){
     const bh=18+Math.floor(dist/60);
-    zombies.push({id:++zid,x:rnd(-3,3),z:SPAWN_Z+8,hp:bh,max:bh,big:true,sp:3.8,ph:0,hit:0});
+    zombies.push({id:++zid,x:rnd(-3,3),z:SPAWN_Z+8,hp:bh,max:bh,big:true,sp:2.0,ph:0,hit:0,atkCd:.5});
     SFX.boss();
   }
 }
@@ -489,12 +492,28 @@ function spawnBoss(){
 
 // ================================================================ Update
 function update(dt){
-  speed=15+Math.min(13, dist/280);
-  dist+=speed*dt;
+  // ---- Tempo: der Trupp bremst ab, wenn die Horde dicht auf ist ----
+  let nearest=999;
+  for(const zb of zombies) if(zb.z<nearest) nearest=zb.z;
+  if(boss && boss.z<nearest) nearest=boss.z;
+  // freie Bahn = volles Tempo, dichte Horde = starkes Abbremsen
+  const want = nearest>36 ? 1 : Math.max(.16, (nearest-1.5)/34);
+  pressure += (want-pressure)*Math.min(1, 2.6*dt);
+  pressure = Math.max(.14, Math.min(1, pressure));
 
-  if(keys.ArrowLeft||keys.a) targetX=Math.max(-ROAD+1,targetX-10*dt);
-  if(keys.ArrowRight||keys.d) targetX=Math.min(ROAD-1,targetX+10*dt);
-  squadX+=(targetX-squadX)*Math.min(1,12*dt);
+  const base = 15+Math.min(13, dist/280);
+  speed = base*pressure;
+  dist += speed*dt;
+
+  // ---- Seitwärts: gedeckelte Höchstgeschwindigkeit statt sofortigem Springen ----
+  if(keys.ArrowLeft||keys.a) targetX=Math.max(-ROAD+1,targetX-MAX_STRAFE*dt);
+  if(keys.ArrowRight||keys.d) targetX=Math.min(ROAD-1,targetX+MAX_STRAFE*dt);
+  const dx=targetX-squadX;
+  if(Math.abs(dx)>.001){
+    const step=Math.min(Math.abs(dx), MAX_STRAFE*dt);
+    squadX += Math.sign(dx)*step;
+  }
+  overrunT=Math.max(0,overrunT-dt);
 
   if(dist>nextGate){ spawnGate(); nextGate+=rnd(100,150); }
   if(dist>nextWave){ spawnWave(); nextWave+=Math.max(34, rnd(65,90)-dist/40) * (boss?1.8:1); }
@@ -586,18 +605,23 @@ function update(dt){
   // Zombies
   for(let i=zombies.length-1;i>=0;i--){
     const zb=zombies[i];
-    zb.z-=(speed+zb.sp)*dt;
-    zb.x+=Math.sign(squadX-zb.x)*Math.min(Math.abs(squadX-zb.x),2.0*dt);
+    const melee = zb.z<1.0;
+    // im Nahkampf werden sie langsamer, laufen aber weiter durch die Linie
+    zb.z-=(speed+zb.sp*(melee?.45:1))*dt;
+    zb.x+=Math.sign(squadX-zb.x)*Math.min(Math.abs(squadX-zb.x),3.4*dt);
     zb.ph+=dt*11; zb.hit=Math.max(0,zb.hit-dt);
-    if(zb.z<.7){
-      if(Math.abs(zb.x-squadX)<2.6){
-        const bite=zb.big?6:1;
+
+    if(melee && Math.abs(zb.x-squadX)<2.8){
+      zb.atkCd-=dt;
+      if(zb.atkCd<=0){
+        zb.atkCd=.55;
         SFX.bite();
-        hurtSquad(bite, zb.x);
+        hurtSquad(zb.big?4:1, zb.x);
+        if(state!=='play') return;
       }
-      zombies.splice(i,1);
-      if(squad<=0){ return; }
     }
+    // Unterer Bildschirmrand erreicht: die Linie ist durchbrochen
+    if(zb.z<OVERRUN_Z){ overrun(); return; }
   }
 
   // Tore
@@ -782,7 +806,7 @@ function updateBoss(dt){
     if(b.st>3.0){
       b.st=0; SFX.bossRoar();
       for(let k=0;k<3;k++)
-        zombies.push({id:++zid,x:b.x+rnd(-2,2),z:b.z-1.5,hp:2,max:2,big:false,sp:rnd(7,10),ph:Math.random()*6.28,hit:0});
+        zombies.push({id:++zid,x:b.x+rnd(-2,2),z:b.z-1.5,hp:2,max:2,big:false,sp:rnd(4,5.5),ph:Math.random()*6.28,hit:0,atkCd:.35});
     }
   }
 
@@ -847,9 +871,11 @@ function applyOp(p){
   const before=squad;
   let next=squad;
   if(p.op==='+') next=squad+p.v;
-  else if(p.op==='-') next=Math.max(0,squad-p.v);
+  else if(p.op==='-') next=squad-p.v;
   else if(p.op==='*') next=squad*p.v;
   else if(p.op==='/') next=Math.floor(squad/p.v);
+  // Ein Tor allein löscht den Trupp nie ganz aus - es bleibt immer einer übrig
+  next=Math.max(1,next);
   // Ein einzelnes Tor bringt höchstens +20 Soldaten
   if(next>before) next=Math.min(next, before+GATE_GAIN_CAP);
   next=Math.min(SQUAD_CAP,next);
@@ -1427,6 +1453,30 @@ function drawWarning(){
   ctx.globalAlpha=1;
 }
 
+function drawPressure(){
+  if(state!=='play') return;
+  // Tempoanzeige: wie viel Vorwärtsdrang bleibt
+  const bw=W*.34, bx=W/2-bw/2, by=H-26;
+  ctx.fillStyle='rgba(11,14,19,.55)';
+  ctx.fillRect(bx-1,by-1,bw+2,7);
+  const col = pressure>.7?'86,227,159' : pressure>.4?'245,197,66' : '232,70,43';
+  ctx.fillStyle='rgba('+col+',.85)';
+  ctx.fillRect(bx,by,bw*pressure,5);
+  ctx.fillStyle='rgba(237,242,247,.35)';
+  ctx.font='700 8px system-ui,sans-serif';
+  ctx.textAlign='center'; ctx.textBaseline='bottom';
+  ctx.fillText(pressure<.45?'HORDE AM TRUPP':'TEMPO',W/2,by-3);
+
+  // roter Saum, wenn Zombies im Nahkampf sind
+  if(pressure<.5){
+    const a=(.5-pressure)*1.1*(0.6+Math.sin(tAcc*9)*.4);
+    const gr=ctx.createLinearGradient(0,H,0,H*.68);
+    gr.addColorStop(0,'rgba(232,70,43,'+Math.min(.55,a)+')');
+    gr.addColorStop(1,'rgba(232,70,43,0)');
+    ctx.fillStyle=gr; ctx.fillRect(0,H*.68,W,H*.32);
+  }
+}
+
 function render(t){
   ctx.save();
   if(shake>0) ctx.translate(rnd(-1,1)*shake*10,rnd(-1,1)*shake*8);
@@ -1489,6 +1539,7 @@ function render(t){
   ctx.fillStyle=v; ctx.fillRect(0,0,W,H);
   drawBossBar();
   drawWarning();
+  drawPressure();
   ctx.restore();
 }
 
@@ -1496,7 +1547,7 @@ function render(t){
 let last=0, tAcc=0;
 function loop(ts){
   requestAnimationFrame(loop);
-  const dt=Math.min(.05,(ts-last)/1000||0);
+  const dt=Math.max(0,Math.min(.05,(ts-last)/1000||0));
   last=ts; tAcc+=dt;
   if(state==='play') update(dt);
   render(tAcc);
@@ -1514,20 +1565,33 @@ function start(){
   reset(); state='play';
   screenEl.classList.add('hidden');
 }
-function gameOver(){
+function overrun(){
+  if(state!=='play') return;
+  shake=.6;
+  SFX.bite();
+  gameOver('durchbruch');
+}
+
+function gameOver(reason){
   if(state!=='play') return;
   state='over';
   SFX.over();
   const m=dist|0;
   const isNew = qualifies(m) && (!scores.length || m>scores[0].m);
-  kickEl.textContent='Trupp ausgelöscht';
-  titleEl.innerHTML='Überrannt<em>auf Meter '+m+'</em>';
+  if(reason==='durchbruch'){
+    kickEl.textContent='Linie durchbrochen';
+    titleEl.innerHTML='Durchbruch<em>bei Meter '+m+'</em>';
+    rulesEl.innerHTML='Kein Zombie darf durch. <b>Der Trupp bremst automatisch ab</b>, wenn die Horde dicht auf ist – nutz die Zeit zum Schießen statt auszuweichen.';
+  }else{
+    kickEl.textContent='Trupp ausgelöscht';
+    titleEl.innerHTML='Aufgerieben<em>bei Meter '+m+'</em>';
+    rulesEl.innerHTML='Merk dir: <span class="bad">rote Tore werden durch Treffer schlimmer</span>, und <span class="bad">Fallen treffen deinen Trupp genauso wie die Zombies</span>.';
+  }
   scoreEl.hidden=false; scoreEl.textContent=m+' m';
   bestEl.hidden=false;
   bestEl.innerHTML = isNew
     ? '<span class="newbest">Neuer Rekord!</span>'
     : (best>0 ? 'Bestwert '+best+' m' : '');
-  rulesEl.innerHTML='Merk dir: <span class="bad">rote Tore werden durch Treffer schlimmer</span>, und <span class="bad">Fallen treffen deinen Trupp genauso wie die Zombies</span>.';
   btn.textContent='Nochmal';
 
   if(qualifies(m)){
@@ -1548,6 +1612,9 @@ nameIn.addEventListener('keydown',e=>{
   e.stopPropagation();
   if(e.key==='Enter'){ e.preventDefault(); submitScore(); }
 });
+
+// Test-Hook für Balancing (beeinflusst das Spiel nicht)
+try{ window.__bdu={ get:()=>({squad,dist,squadX,pressure,zombies,boss,state}), aim:v=>{targetX=Math.max(-ROAD+1,Math.min(ROAD-1,v));} }; }catch(e){}
 
 resize(); reset(); loadScores(); renderScores(); listEl.hidden=!scores.length; listTitleEl.hidden=!scores.length;
 requestAnimationFrame(loop);
