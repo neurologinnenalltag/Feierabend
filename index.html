@@ -496,19 +496,20 @@ function spawnGate(){
 }
 let zid=0;
 function spawnWave(){
-  const n=Math.min(42, 4+Math.floor(dist/95));
+  const n=Math.min(42, 4+Math.floor(dist/108));
   const hp=1+Math.floor(dist/240);
   for(let i=0;i<n;i++){
     zombies.push({
       id:++zid,
-      x:rnd(-ROAD+.8,ROAD-.8),
-      z:SPAWN_Z+Math.floor(i/5)*3.0+rnd(0,1.4),
-      hp:hp,max:hp,big:false,sp:rnd(3.2,5.2),ph:Math.random()*6.28,hit:0,feed:0
+      x:rnd(-ROAD+.6,ROAD-.6),
+      z:SPAWN_Z+rnd(0,14)+Math.floor(i/6)*2.6,
+      hp:hp,max:hp,big:false,sp:rnd(3.2,5.2),ph:Math.random()*6.28,hit:0,feed:0,
+      wob:Math.random()*6.28, wobA:rnd(.6,2.0), drift:rnd(-.5,.5)
     });
   }
   if(dist>700 && Math.random()<.35){
     const bh=18+Math.floor(dist/60);
-    zombies.push({id:++zid,x:rnd(-3,3),z:SPAWN_Z+8,hp:bh,max:bh,big:true,sp:2.0,ph:0,hit:0,feed:0});
+    zombies.push({id:++zid,x:rnd(-3,3),z:SPAWN_Z+8,hp:bh,max:bh,big:true,sp:2.0,ph:0,hit:0,feed:0,wob:Math.random()*6.28,wobA:.5,drift:0});
     SFX.boss();
   }
 }
@@ -726,8 +727,17 @@ function update(dt){
     }
 
     zb.z-=(speed+zb.sp*(buffs.frost?.35:1))*dt;
-    zb.x+=Math.sign(squadX-zb.x)*Math.min(Math.abs(squadX-zb.x),3.4*dt);
-    zb.ph+=dt*11;
+    zb.ph+=dt*11; zb.wob+=dt*1.4;
+    // Aus der Ferne torkelt die Horde breit gestreut heran. Erst auf den letzten
+    // rund 30 Metern nimmt sie den Trupp gezielt ins Visier.
+    const lock=Math.max(0, Math.min(1, (32-zb.z)/20));
+    const home=lock*lock*4.2;
+    const dxs=squadX-zb.x;
+    zb.x += Math.sign(dxs)*Math.min(Math.abs(dxs), home*dt);
+    // Schlingern und seitliches Abdriften, das beim Anvisieren ausklingt
+    const loose=1-lock;
+    zb.x += (Math.sin(zb.wob)*zb.wobA + zb.drift)*loose*dt;
+    zb.x = Math.max(-ROAD+.4, Math.min(ROAD-.4, zb.x));
 
     // erreicht er den Trupp, beißt er sich fest
     if(zb.z<1.6 && Math.abs(zb.x-squadX)<3.0 && squad>0){
@@ -969,7 +979,7 @@ function updateBoss(dt){
     if(b.st>3.0){
       b.st=0; SFX.bossRoar();
       for(let k=0;k<3;k++)
-        zombies.push({id:++zid,x:b.x+rnd(-2,2),z:b.z-1.5,hp:2,max:2,big:false,sp:rnd(4,5.5),ph:Math.random()*6.28,hit:0,feed:0});
+        zombies.push({id:++zid,x:b.x+rnd(-2,2),z:b.z-1.5,hp:2,max:2,big:false,sp:rnd(4,5.5),ph:Math.random()*6.28,hit:0,feed:0,wob:Math.random()*6.28,wobA:1.2,drift:rnd(-.4,.4)});
     }
   }
 
