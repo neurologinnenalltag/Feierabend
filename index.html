@@ -33,21 +33,25 @@
     border:1px solid rgba(237,242,247,.2);color:rgba(237,242,247,.75);border-radius:2px;
     font-size:10px;letter-spacing:.2em;text-transform:uppercase;padding:8px 12px;cursor:pointer;}
 
-  #screen{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
-    text-align:center;padding:28px;gap:18px;background:radial-gradient(120% 80% at 50% 45%,rgba(11,14,19,.55),rgba(4,6,10,.95));}
+  #screen{position:absolute;inset:0;display:flex;align-items:flex-start;justify-content:center;
+    overflow-y:auto;-webkit-overflow-scrolling:touch;
+    padding:16px 20px calc(16px + env(safe-area-inset-bottom,0px));
+    background:radial-gradient(120% 80% at 50% 45%,rgba(11,14,19,.55),rgba(4,6,10,.95));}
   #screen.hidden{display:none}
-  h1{font-size:clamp(30px,10vw,52px);line-height:.9;text-transform:uppercase;font-weight:900;}
+  #panel{margin:auto 0;display:flex;flex-direction:column;align-items:center;text-align:center;
+    gap:clamp(8px,1.6vh,18px);width:100%;max-width:360px;}
+  h1{font-size:clamp(22px,6.4vh,48px);line-height:.9;text-transform:uppercase;font-weight:900;}
   h1 em{font-style:normal;color:var(--hazard);display:block;}
   .kicker{font-size:10px;letter-spacing:.35em;text-transform:uppercase;color:var(--lamp);}
-  .rules{font-size:14px;line-height:1.55;color:rgba(237,242,247,.72);max-width:36ch;font-family:system-ui,sans-serif;}
+  .rules{font-size:clamp(10.5px,1.65vh,14px);line-height:1.45;color:rgba(237,242,247,.72);max-width:36ch;font-family:system-ui,sans-serif;}
   .rules b{color:var(--paper);font-weight:600}
   .rules .bad{color:#FF9C8A;font-weight:600}
-  .score{font-family:ui-monospace,Menlo,monospace;font-size:44px;font-weight:700;color:var(--lamp);line-height:1}
+  .score{font-family:ui-monospace,Menlo,monospace;font-size:clamp(26px,5.4vh,44px);font-weight:700;color:var(--lamp);line-height:1}
   .best{font-family:ui-monospace,Menlo,monospace;font-size:13px;color:rgba(237,242,247,.55)}
   .newbest{color:var(--toxic)}
   button.cta{
     pointer-events:auto;cursor:pointer;font:inherit;font-size:14px;font-weight:700;letter-spacing:.24em;text-transform:uppercase;
-    background:var(--toxic);color:#06231a;border:0;border-radius:2px;padding:15px 34px;
+    background:var(--toxic);color:#06231a;border:0;border-radius:2px;padding:clamp(11px,1.8vh,15px) 34px;
     box-shadow:0 0 0 1px rgba(86,227,159,.4),0 10px 30px -12px rgba(86,227,159,.7);
     transition:transform .12s ease,filter .12s ease;
   }
@@ -66,7 +70,7 @@
   #nameIn:focus{outline:none;border-color:var(--toxic);color:var(--toxic)}
   #nameIn::placeholder{color:rgba(237,242,247,.28);letter-spacing:.12em}
   button.small{padding:11px 24px;font-size:12px}
-  #scoreList{list-style:none;width:100%;max-width:300px;font-family:ui-monospace,Menlo,monospace;font-size:12.5px;
+  #scoreList{list-style:none;width:100%;max-width:300px;max-height:30vh;overflow-y:auto;font-family:ui-monospace,Menlo,monospace;font-size:12.5px;
     display:flex;flex-direction:column;gap:2px;pointer-events:auto}
   #scoreList li{display:flex;gap:8px;align-items:baseline;padding:4px 8px;background:rgba(11,14,19,.5);
     border-left:2px solid rgba(245,197,66,.25);}
@@ -76,6 +80,11 @@
   #scoreList .m{color:var(--lamp);flex:none;font-weight:700}
   #scoreList li.me .m{color:var(--toxic)}
   .listTitle{font-size:9px;letter-spacing:.3em;text-transform:uppercase;color:rgba(237,242,247,.45)}
+  /* Auf niedrigen Bildschirmen Text kürzen statt den Startknopf wegzuschieben */
+  @media (max-height:660px){
+    .rules{max-height:9.5em;overflow-y:auto}
+    #nameIn{padding:9px 12px;font-size:16px}
+  }
 </style>
 </head>
 <body>
@@ -98,7 +107,8 @@
   <button id="mute" aria-label="Ton umschalten">Ton an</button>
 
   <div id="screen">
-    <div class="kicker" id="kicker">Sektor 7 · Nachtschicht</div>
+   <div id="panel">
+    <div class="kicker" id="kicker">Sektor 1 · Hängebrücke</div>
     <h1 id="title">Brücke<em>der Untoten</em></h1>
     <div class="score" id="scoreLine" hidden>0 m</div>
     <div class="best" id="bestLine" hidden></div>
@@ -112,16 +122,15 @@
     <div class="listTitle" id="listTitle" hidden>Top 10</div>
     <ol id="scoreList" hidden></ol>
     <p class="rules" id="rules">
-      Finger oder Maus steuert den Trupp, geschossen wird von allein.<br><br>
-      <b>Grüne Tore freischießen</b> – erst wenn die Panzerung durch ist, rückt die Verstärkung ein.
-      <span class="bad">Rote Tore niemals beschießen:</span> zerschießt du sie, zündet die Ladung
-      sofort im eigenen Trupp. Durchlaufen kostet genauso. Rot heißt: Feuer einstellen und ausweichen.<br><br>
-      Zombies beißen sich am Trupp fest und fressen ihn auf. Solange sie dranhängen,
-      steht ihr still. <span class="bad">Stacheln töten jeden Soldaten, der darüberläuft.</span><br><br>
-      <b>Leuchtende Kristalle</b> geben kurzzeitige Verstärkungen – Schnellfeuer, Panzermunition,
-      Streufeuer, Durchschlag, Kälteschock. Neue Waffenklassen gibt es erst ab 1000 m.
+      Finger oder Maus steuert den Trupp, geschossen wird automatisch.<br><br>
+      <b>Grüne Tore freischießen</b> für Verstärkung.
+      <span class="bad">Rote Tore nicht beschießen</span> – sie zünden im eigenen Trupp.
+      Zombies fressen sich fest, solange sie hängen steht ihr still.
+      <span class="bad">Stacheln töten jeden, der darüberläuft.</span>
+      Kristalle geben kurze Boni, neue Waffen ab 1000 m.
     </p>
     <button class="cta" id="btn">Losrennen</button>
+   </div>
   </div>
 </div></div>
 
@@ -380,12 +389,27 @@ const POWERUPS=[
   { id:'pierce', name:'DURCHSCHLAG',    dur:10, col:'#D6B8FF', glow:'214,184,255' },
   { id:'frost',  name:'KÄLTESCHOCK',    dur:9,  col:'#9BE7FF', glow:'155,231,255' },
 ];
+// Nach jedem erlegten Boss wechselt der Schauplatz
+const BIOMES=[
+  { id:'bruecke', name:'HÄNGEBRÜCKE', road:['#0E141C','#1C2531'], rail:'#2A3646',
+    lamp:'245,197,66', sky:['#060911','#101a2b','#2a3b55'], fog:'70,120,110',
+    mark:true,  surface:'cracks', towers:'pylon', edge:'rail',   light:'lamp',    reflect:true },
+  { id:'mauer',   name:'STADTMAUER', road:['#1A1712','#2B2620'], rail:'#3A342B',
+    lamp:'255,140,60', sky:['#0A0708','#1C1216','#3A2430'], fog:'120,80,70',
+    mark:false, surface:'stone',  towers:'wall',  edge:'merlon', light:'torch',   reflect:false },
+  { id:'steg',    name:'HOLZSTEG',   road:['#241C15','#3A2C20'], rail:'#4A3726',
+    lamp:'180,220,255', sky:['#04070E','#0C1826','#1E3448'], fog:'90,140,170',
+    mark:false, surface:'planks', towers:'none',  edge:'posts',  light:'lantern', reflect:true },
+  { id:'deich',   name:'SEEDEICH',   road:['#14180F','#232B1A'], rail:'#3B4A2C',
+    lamp:'200,220,180', sky:['#070B0A','#12201C','#263A34'], fog:'110,140,120',
+    mark:false, surface:'grass',  towers:'none',  edge:'fence',  light:'none',    reflect:false },
+];
 const WEAPON_START=1000;   // ab hier gibt es überhaupt neue Waffenklassen
 
 let state='menu';
 let squad, weap, dist, speed, squadX, targetX, shake, fireT, flashT, pressure, overrunT;
 let zombies, bullets, gates, crates, parts, floats, dying, decals, clouds, fallen, casings;
-let traps, boss, bossShots, bossIdx, nextBoss, warnT, pups, buffs, nextPup;
+let traps, boss, bossShots, bossIdx, nextBoss, warnT, pups, buffs, nextPup, biome, sectorT;
 let nextGate, nextWave, nextCrate, nextTrap;
 
 function reset(){
@@ -393,7 +417,7 @@ function reset(){
   squadX=0; targetX=0; shake=0; fireT=0; flashT=0;
   zombies=[]; bullets=[]; gates=[]; crates=[]; parts=[]; floats=[]; dying=[]; decals=[]; fallen=[]; casings=[];
   traps=[]; boss=null; bossShots=[]; bossIdx=0; nextBoss=1200; warnT=0;
-  pups=[]; buffs={}; nextPup=150;
+  pups=[]; buffs={}; nextPup=150; biome=0; sectorT=0; sky=null;
   clouds=[]; for(let i=0;i<4;i++) clouds.push({x:rnd(0,1),y:rnd(.02,.16),w:rnd(.2,.4),v:rnd(.004,.012)});
   nextGate=5; nextWave=135; nextCrate=WEAPON_START; nextTrap=250;
   syncHud();
@@ -564,6 +588,7 @@ function update(dt){
   if(dist>nextTrap){ spawnTrap(); nextTrap+=Math.max(55, rnd(115,165)-dist/30); }
   if(dist>nextBoss && !boss){ spawnBoss(); nextBoss+=rnd(780,980); }
   warnT=Math.max(0,warnT-dt);
+  sectorT=Math.max(0,sectorT-dt);
 
   // Feuern
   const w=WEAPONS[weap];
@@ -899,6 +924,10 @@ function killBoss(){
   }
   bossShots=[];
   boss=null;
+  // Schauplatzwechsel: nach jedem Boss geht es in einen neuen Sektor
+  biome=(biome+1)%BIOMES.length;
+  sky=null; stars=null;
+  sectorT=3.0;
   syncHud();
 }
 
@@ -1084,16 +1113,16 @@ function dropSoldiers(k){
 // ================================================================ Zeichnen
 let sky=null, stars=null;
 function drawSky(){
+  const B=BIOMES[biome];
   if(!sky){
     sky=ctx.createLinearGradient(0,0,0,HZ+40);
-    sky.addColorStop(0,'#060911');
-    sky.addColorStop(.55,'#101a2b');
-    sky.addColorStop(1,'#2a3b55');
+    sky.addColorStop(0,B.sky[0]);
+    sky.addColorStop(.55,B.sky[1]);
+    sky.addColorStop(1,B.sky[2]);
   }
   ctx.fillStyle=sky; ctx.fillRect(0,0,W,HZ+40);
   ctx.fillStyle='#05070A'; ctx.fillRect(0,HZ+38,W,H-HZ);
 
-  // Sterne (fix, einmal generiert)
   if(!stars){
     stars=[];
     for(let i=0;i<46;i++) stars.push([Math.random()*W, Math.random()*HZ*.75, Math.random()]);
@@ -1114,7 +1143,6 @@ function drawSky(){
   ctx.beginPath(); ctx.arc(mx-mr*.3,my-mr*.15,mr*.22,0,6.284); ctx.fill();
   ctx.beginPath(); ctx.arc(mx+mr*.25,my+mr*.3,mr*.15,0,6.284); ctx.fill();
 
-  // Wolken
   for(const cl of clouds){
     ctx.fillStyle='rgba(18,26,40,.75)';
     const cx=cl.x*W, cy=cl.y*H, cw=cl.w*W;
@@ -1122,33 +1150,94 @@ function drawSky(){
     ctx.beginPath(); ctx.ellipse(cx+cw*.4,cy+cw*.06,cw*.6,cw*.16,0,0,6.284); ctx.fill();
   }
 
-  // Skyline in zwei Ebenen mit unterschiedlicher Parallaxe
-  const bw=W/14;
-  const layers=[
-    {off:(dist*0.05)%(bw*2), col:'#0A0F18', h0:14, sf:0.7, lit:'rgba(245,197,66,.16)'},
-    {off:(dist*0.13)%(bw*2), col:'#0D141F', h0:20, sf:1.0, lit:'rgba(245,197,66,.36)'}
-  ];
-  for(const L of layers){
-    for(let i=-1;i<17;i++){
-      const bx=i*bw-L.off;
-      const h=(L.h0+((i*37)%5)*11+((i*13)%3)*7)*L.sf;
-      ctx.fillStyle=L.col;
-      ctx.fillRect(bx,HZ-h,bw-3,h);
-      if((i*7)%3===0){
-        ctx.fillStyle=L.lit;
-        ctx.fillRect(bx+bw*.28,HZ-h+6,3,3);
-        ctx.fillRect(bx+bw*.55,HZ-h+15,3,3);
-      }
-    }
-  }
+  drawBackdrop(B);
+
   const fog=ctx.createLinearGradient(0,HZ-40,0,HZ+70);
-  fog.addColorStop(0,'rgba(86,227,159,0)');
-  fog.addColorStop(.55,'rgba(70,120,110,.32)');
+  fog.addColorStop(0,'rgba('+B.fog+',0)');
+  fog.addColorStop(.55,'rgba('+B.fog+',.32)');
   fog.addColorStop(1,'rgba(11,14,19,0)');
   ctx.fillStyle=fog; ctx.fillRect(0,HZ-40,W,110);
 }
 
+// Kulisse am Horizont: je Sektor ein eigenes Motiv, in zwei Parallax-Ebenen
+function drawBackdrop(B){
+  const bw=W/14;
+  if(B.id==='bruecke'){
+    const layers=[
+      {off:(dist*0.05)%(bw*2), col:'#0A0F18', h0:14, sf:0.7, lit:'rgba(245,197,66,.16)'},
+      {off:(dist*0.13)%(bw*2), col:'#0D141F', h0:20, sf:1.0, lit:'rgba(245,197,66,.36)'}
+    ];
+    for(const L of layers){
+      for(let i=-1;i<17;i++){
+        const bx=i*bw-L.off;
+        const h=(L.h0+((i*37)%5)*11+((i*13)%3)*7)*L.sf;
+        ctx.fillStyle=L.col; ctx.fillRect(bx,HZ-h,bw-3,h);
+        if((i*7)%3===0){
+          ctx.fillStyle=L.lit;
+          ctx.fillRect(bx+bw*.28,HZ-h+6,3,3);
+          ctx.fillRect(bx+bw*.55,HZ-h+15,3,3);
+        }
+      }
+    }
+  }else if(B.id==='mauer'){
+    // Bergkamm hinter der Mauer
+    for(const L of [{off:(dist*.04)%(bw*3),col:'#0F0B10',sf:.65},{off:(dist*.10)%(bw*3),col:'#1A1218',sf:1}]){
+      ctx.fillStyle=L.col;
+      ctx.beginPath(); ctx.moveTo(-10,HZ+4);
+      for(let i=-1;i<19;i++){
+        const bx=i*bw*.8-L.off;
+        const h=(26+((i*53)%7)*9)*L.sf;
+        ctx.lineTo(bx+bw*.4,HZ-h);
+        ctx.lineTo(bx+bw*.8,HZ+4);
+      }
+      ctx.lineTo(W+10,HZ+4); ctx.closePath(); ctx.fill();
+    }
+    // Feuerschein am Horizont
+    const gl=ctx.createLinearGradient(0,HZ-30,0,HZ+6);
+    gl.addColorStop(0,'rgba(255,110,40,0)'); gl.addColorStop(1,'rgba(255,110,40,.18)');
+    ctx.fillStyle=gl; ctx.fillRect(0,HZ-30,W,36);
+  }else if(B.id==='steg'){
+    // Wasserfläche mit Mondglitzer und Inselhügeln
+    ctx.fillStyle='#0A1622'; ctx.fillRect(0,HZ-6,W,44);
+    ctx.fillStyle='#101E2C';
+    for(let i=-1;i<9;i++){
+      const bx=i*bw*1.8-((dist*.06)%(bw*3.6));
+      ctx.beginPath();
+      ctx.ellipse(bx,HZ-1,bw*.9,10+((i*29)%3)*5,0,Math.PI,0);
+      ctx.fill();
+    }
+    for(let i=0;i<26;i++){
+      const gy=HZ+2+(i%9)*3.4;
+      const gx=W*.78+Math.sin(i*2.1+tAcc*.6)*(18+i*2.6);
+      ctx.fillStyle='rgba(220,232,255,'+(0.16-(i%9)*0.014)+')';
+      ctx.fillRect(gx,gy,10+((i*7)%12),1.4);
+    }
+  }else{
+    // Deich: flaches Land mit Windrädern
+    ctx.fillStyle='#101A14'; ctx.fillRect(0,HZ-4,W,42);
+    const off=(dist*.09)%(bw*4);
+    for(let i=-1;i<6;i++){
+      const bx=i*bw*4-off+bw;
+      const h=30+((i*41)%3)*8;
+      ctx.strokeStyle='rgba(120,150,130,.35)'; ctx.lineWidth=1.5;
+      ctx.beginPath(); ctx.moveTo(bx,HZ); ctx.lineTo(bx,HZ-h); ctx.stroke();
+      ctx.save(); ctx.translate(bx,HZ-h); ctx.rotate(tAcc*.7+i);
+      for(let k=0;k<3;k++){
+        ctx.rotate(2.094);
+        ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(0,-h*.42); ctx.stroke();
+      }
+      ctx.restore();
+    }
+    // Grasnarbe am Horizont
+    ctx.fillStyle='#16241A';
+    for(let i=0;i<W;i+=7){
+      ctx.fillRect(i,HZ+2,3,4+((i*13)%3)*2);
+    }
+  }
+}
+
 function drawRoad(){
+  const B=BIOMES[biome];
   const fz=SPAWN_Z+45, nz=-4;
   const sf=sc(fz), sn=sc(nz);
   ctx.beginPath();
@@ -1158,126 +1247,248 @@ function drawRoad(){
   ctx.lineTo(px(-ROAD,nz,sn),py(nz,sn,0));
   ctx.closePath();
   const g=ctx.createLinearGradient(0,py(fz,sf,0),0,py(nz,sn,0));
-  g.addColorStop(0,'#0E141C'); g.addColorStop(1,'#1C2531');
+  g.addColorStop(0,B.road[0]); g.addColorStop(1,B.road[1]);
   ctx.fillStyle=g; ctx.fill();
 
-  // Risse
-  ctx.strokeStyle='rgba(0,0,0,.35)'; ctx.lineWidth=1;
-  const co=dist%40;
-  for(let i=0;i<6;i++){
-    const z0=i*40-co+9; if(z0<nz) continue;
-    const s0=sc(z0);
-    const cx=((i*173)%13-6);
-    ctx.beginPath();
-    ctx.moveTo(px(cx,z0,s0),py(z0,s0,0));
-    ctx.lineTo(px(cx+1.6,z0-2,sc(z0-2)),py(z0-2,sc(z0-2),0));
-    ctx.lineTo(px(cx+.8,z0-4,sc(z0-4)),py(z0-4,sc(z0-4),0));
-    ctx.stroke();
+  // Oberflächenstruktur: Risse, Planken oder Grasnarben
+  if(B.surface==='cracks'){
+    ctx.strokeStyle='rgba(0,0,0,.35)'; ctx.lineWidth=1;
+    const co=dist%40;
+    for(let i=0;i<6;i++){
+      const z0=i*40-co+9; if(z0<nz) continue;
+      const s0=sc(z0), cx=((i*173)%13-6);
+      ctx.beginPath();
+      ctx.moveTo(px(cx,z0,s0),py(z0,s0,0));
+      ctx.lineTo(px(cx+1.6,z0-2,sc(z0-2)),py(z0-2,sc(z0-2),0));
+      ctx.lineTo(px(cx+.8,z0-4,sc(z0-4)),py(z0-4,sc(z0-4),0));
+      ctx.stroke();
+    }
+  }else if(B.surface==='planks'){
+    const off=dist%2.2;
+    for(let i=0;i<60;i++){
+      const z=i*2.2-off; if(z<nz||z>fz) continue;
+      const s0=sc(z);
+      ctx.strokeStyle='rgba(0,0,0,.32)'; ctx.lineWidth=Math.max(1,1.6*s0);
+      ctx.beginPath();
+      ctx.moveTo(px(-ROAD,z,s0),py(z,s0,0));
+      ctx.lineTo(px(ROAD,z,s0),py(z,s0,0));
+      ctx.stroke();
+    }
+  }else if(B.surface==='grass'){
+    const off=dist%5;
+    ctx.fillStyle='rgba(60,90,55,.5)';
+    for(let i=0;i<40;i++){
+      const z=i*5-off; if(z<nz||z>fz) continue;
+      const s0=sc(z);
+      for(const sd of [-1,1]){
+        const gx=px(sd*(ROAD-.7+Math.sin(i*2.3)*.4),z,s0);
+        ctx.fillRect(gx,py(z,s0,0)-.5*PPU*s0,Math.max(1,.16*PPU*s0),.5*PPU*s0);
+      }
+    }
+  }else if(B.surface==='stone'){
+    const off=dist%3.4;
+    for(let i=0;i<44;i++){
+      const z=i*3.4-off; if(z<nz||z>fz) continue;
+      const s0=sc(z);
+      ctx.strokeStyle='rgba(0,0,0,.28)'; ctx.lineWidth=Math.max(1,1.2*s0);
+      ctx.beginPath();
+      ctx.moveTo(px(-ROAD,z,s0),py(z,s0,0));
+      ctx.lineTo(px(ROAD,z,s0),py(z,s0,0));
+      ctx.stroke();
+      const shift=(i%2)?2.2:0;
+      for(let k=-2;k<=2;k++){
+        const bx=px(k*2.6+shift,z,s0);
+        ctx.beginPath();
+        ctx.moveTo(bx,py(z,s0,0));
+        ctx.lineTo(px(k*2.6+shift,z+3.4,sc(z+3.4)),py(z+3.4,sc(z+3.4),0));
+        ctx.stroke();
+      }
+    }
   }
 
   // Blutlachen
   for(const d of decals){
     if(d.z<nz) continue;
-    const s=sc(d.z);
+    const s0=sc(d.z);
     ctx.fillStyle='rgba(122,22,16,'+Math.max(0,d.a)+')';
     ctx.beginPath();
-    ctx.ellipse(px(d.x,d.z,s),py(d.z,s,0),d.r*PPU*s,d.r*.3*PPU*s,0,0,6.284);
+    ctx.ellipse(px(d.x,d.z,s0),py(d.z,s0,0),d.r*PPU*s0,d.r*.3*PPU*s0,0,0,6.284);
     ctx.fill();
   }
 
-  // Mittelstreifen
-  const off=dist%8;
-  ctx.fillStyle='rgba(245,197,66,.30)';
-  for(let i=0;i<26;i++){
-    const z0=i*8-off, z1=z0+3.6;
-    if(z1<nz) continue;
-    const s0=sc(Math.max(z0,nz)), s1=sc(z1);
-    ctx.beginPath();
-    ctx.moveTo(px(-.16,z1,s1),py(z1,s1,0));
-    ctx.lineTo(px(.16,z1,s1),py(z1,s1,0));
-    ctx.lineTo(px(.22,Math.max(z0,nz),s0),py(Math.max(z0,nz),s0,0));
-    ctx.lineTo(px(-.22,Math.max(z0,nz),s0),py(Math.max(z0,nz),s0,0));
-    ctx.closePath(); ctx.fill();
-  }
-
-  // ---- Hängebrücken-Pylone mit Querträger und Schrägseilen ----
-  const TOWER_GAP=130;
-  const to=dist%TOWER_GAP;
-  for(let i=0;i<3;i++){
-    const z=i*TOWER_GAP-to+30;
-    if(z<nz||z>fz) continue;
-    const s=sc(z);
-    const yb=py(z,s,0), yt=py(z,s,15);
-    const xl=px(-ROAD,z,s), xr=px(ROAD,z,s);
-    const pw=Math.max(2,.55*PPU*s);
-    // Pylone
-    ctx.fillStyle='#22303F';
-    ctx.fillRect(xl-pw/2,yt,pw,yb-yt);
-    ctx.fillRect(xr-pw/2,yt,pw,yb-yt);
-    // Querträger oben
-    ctx.fillRect(xl-pw/2,yt,xr-xl+pw,Math.max(2,.5*PPU*s));
-    // rote Positionslichter
-    ctx.fillStyle='rgba(232,70,43,'+(.5+Math.sin(tAcc*3+i)*.3)+')';
-    ctx.beginPath(); ctx.arc(xl,yt,Math.max(1.5,.14*PPU*s),0,6.284); ctx.fill();
-    ctx.beginPath(); ctx.arc(xr,yt,Math.max(1.5,.14*PPU*s),0,6.284); ctx.fill();
-    // Schrägseile fächerartig nach vorn und hinten
-    ctx.strokeStyle='rgba(120,140,165,.35)'; ctx.lineWidth=1;
-    for(const dz of [-40,-25,-12,12,25,40]){
-      const z2=z+dz; if(z2<nz||z2>fz) continue;
-      const s2=sc(z2);
-      ctx.beginPath(); ctx.moveTo(xl,yt); ctx.lineTo(px(-ROAD,z2,s2),py(z2,s2,1.35)); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(xr,yt); ctx.lineTo(px(ROAD,z2,s2),py(z2,s2,1.35)); ctx.stroke();
-    }
-  }
-
-  // Geländer + Lampen
-  for(const side of [-1,1]){
-    const X=ROAD*side;
-    ctx.beginPath();
-    for(let z=fz;z>=nz;z-=4){const s=sc(z);ctx.lineTo(px(X,z,s),py(z,s,1.35));}
-    for(let z=nz;z<=fz;z+=4){const s=sc(z);ctx.lineTo(px(X,z,s),py(z,s,1.05));}
-    ctx.closePath(); ctx.fillStyle='#2A3646'; ctx.fill();
-
-    const lo=dist%26;
-    for(let i=0;i<7;i++){
-      const z=i*26-lo+6;
-      if(z<nz||z>fz) continue;
-      const s=sc(z);
-      const bx=px(X,z,s), by=py(z,s,0);
-      ctx.fillStyle='#38465A';
-      ctx.fillRect(bx-.1*PPU*s,by-6*PPU*s,.2*PPU*s,6*PPU*s);
-      const gx=bx-side*1.1*PPU*s, gy=by-6*PPU*s;
-      const flicker=.5+Math.sin(tAcc*7+i*3)*.06;
-      const halo=ctx.createRadialGradient(gx,gy,0,gx,gy,3.4*PPU*s);
-      halo.addColorStop(0,'rgba(245,197,66,'+flicker+')');
-      halo.addColorStop(1,'rgba(245,197,66,0)');
-      ctx.fillStyle=halo;
-      ctx.beginPath(); ctx.arc(gx,gy,3.4*PPU*s,0,6.284); ctx.fill();
-      ctx.fillStyle='rgba(245,197,66,.05)';
+  // Mittelmarkierung nur auf Fahrbahnen
+  if(B.mark){
+    const off=dist%8;
+    ctx.fillStyle='rgba(245,197,66,.30)';
+    for(let i=0;i<26;i++){
+      const z0=i*8-off, z1=z0+3.6;
+      if(z1<nz) continue;
+      const s0=sc(Math.max(z0,nz)), s1=sc(z1);
       ctx.beginPath();
-      ctx.ellipse(px(X-side*1.1,z,s),by,2.6*PPU*s,.7*PPU*s,0,0,6.284);
-      ctx.fill();
-      // nasser Asphalt: langgezogene Spiegelung zum Betrachter hin
-      const rz=Math.max(-3,z-9), rs=sc(rz);
-      const refl=ctx.createLinearGradient(0,by,0,py(rz,rs,0));
-      refl.addColorStop(0,'rgba(245,197,66,.16)');
-      refl.addColorStop(1,'rgba(245,197,66,0)');
-      ctx.fillStyle=refl;
-      ctx.beginPath();
-      ctx.moveTo(px(X-side*1.5,z,s),by);
-      ctx.lineTo(px(X-side*0.7,z,s),by);
-      ctx.lineTo(px(X-side*1.6,rz,rs),py(rz,rs,0));
-      ctx.lineTo(px(X-side*2.6,rz,rs),py(rz,rs,0));
+      ctx.moveTo(px(-.16,z1,s1),py(z1,s1,0));
+      ctx.lineTo(px(.16,z1,s1),py(z1,s1,0));
+      ctx.lineTo(px(.22,Math.max(z0,nz),s0),py(Math.max(z0,nz),s0,0));
+      ctx.lineTo(px(-.22,Math.max(z0,nz),s0),py(Math.max(z0,nz),s0,0));
       ctx.closePath(); ctx.fill();
     }
   }
 
-  // Tiefennebel: ferne Fahrbahn versinkt im Dunst
+  drawTowers(B,fz,nz);
+  drawEdges(B,fz,nz);
+
   const dfog=ctx.createLinearGradient(0,py(fz,sf,0),0,py(30,sc(30),0));
   dfog.addColorStop(0,'rgba(30,45,55,.55)');
   dfog.addColorStop(1,'rgba(30,45,55,0)');
   ctx.fillStyle=dfog;
   ctx.fillRect(0,py(fz,sf,0)-2,W,py(30,sc(30),0)-py(fz,sf,0)+4);
+}
+
+// Große Bauwerke, die in regelmäßigen Abständen vorbeiziehen
+function drawTowers(B,fz,nz){
+  if(B.towers==='none') return;
+  const GAP=B.towers==='wall'?110:130;
+  const to=dist%GAP;
+  for(let i=0;i<3;i++){
+    const z=i*GAP-to+30;
+    if(z<nz||z>fz) continue;
+    const s=sc(z);
+    const yb=py(z,s,0);
+    const xl=px(-ROAD,z,s), xr=px(ROAD,z,s);
+
+    if(B.towers==='pylon'){
+      const yt=py(z,s,15);
+      const pw=Math.max(2,.55*PPU*s);
+      ctx.fillStyle='#22303F';
+      ctx.fillRect(xl-pw/2,yt,pw,yb-yt);
+      ctx.fillRect(xr-pw/2,yt,pw,yb-yt);
+      ctx.fillRect(xl-pw/2,yt,xr-xl+pw,Math.max(2,.5*PPU*s));
+      ctx.fillStyle='rgba(232,70,43,'+(.5+Math.sin(tAcc*3+i)*.3)+')';
+      ctx.beginPath(); ctx.arc(xl,yt,Math.max(1.5,.14*PPU*s),0,6.284); ctx.fill();
+      ctx.beginPath(); ctx.arc(xr,yt,Math.max(1.5,.14*PPU*s),0,6.284); ctx.fill();
+      ctx.strokeStyle='rgba(120,140,165,.35)'; ctx.lineWidth=1;
+      for(const dz of [-40,-25,-12,12,25,40]){
+        const z2=z+dz; if(z2<nz||z2>fz) continue;
+        const s2=sc(z2);
+        ctx.beginPath(); ctx.moveTo(xl,yt); ctx.lineTo(px(-ROAD,z2,s2),py(z2,s2,1.35)); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(xr,yt); ctx.lineTo(px(ROAD,z2,s2),py(z2,s2,1.35)); ctx.stroke();
+      }
+    }else if(B.towers==='wall'){
+      // Wehrtürme links und rechts mit Zinnenkranz
+      const yt=py(z,s,7.5);
+      const tw=Math.max(3,1.5*PPU*s);
+      for(const side of [-1,1]){
+        const bx=(side<0?xl:xr)-side*tw*.2;
+        ctx.fillStyle='#2E2620';
+        ctx.fillRect(bx-tw/2,yt,tw,yb-yt);
+        ctx.fillStyle='#3E342B';
+        ctx.fillRect(bx-tw*.62,yt-tw*.18,tw*1.24,tw*.22);
+        for(let k=-1;k<=1;k++)
+          ctx.fillRect(bx+k*tw*.4-tw*.11,yt-tw*.46,tw*.22,tw*.3);
+        // Feuerkorb
+        const fx=bx, fy=yt-tw*.5;
+        const fl=ctx.createRadialGradient(fx,fy,0,fx,fy,tw*1.1);
+        fl.addColorStop(0,'rgba(255,150,60,'+(.5+Math.sin(tAcc*9+i)*.15)+')');
+        fl.addColorStop(1,'rgba(255,120,40,0)');
+        ctx.fillStyle=fl;
+        ctx.beginPath(); ctx.arc(fx,fy,tw*1.1,0,6.284); ctx.fill();
+      }
+    }
+  }
+}
+
+// Seitliche Begrenzung: Geländer, Zinnen, Holzpfosten oder Weidezaun
+function drawEdges(B,fz,nz){
+  for(const side of [-1,1]){
+    const X=ROAD*side;
+
+    if(B.edge==='rail'){
+      ctx.beginPath();
+      for(let z=fz;z>=nz;z-=4){const s=sc(z);ctx.lineTo(px(X,z,s),py(z,s,1.35));}
+      for(let z=nz;z<=fz;z+=4){const s=sc(z);ctx.lineTo(px(X,z,s),py(z,s,1.05));}
+      ctx.closePath(); ctx.fillStyle=B.rail; ctx.fill();
+    }else if(B.edge==='merlon'){
+      // Zinnenmauer: abwechselnd hoch und niedrig
+      const off=dist%3;
+      for(let i=0;i<44;i++){
+        const z=i*3-off; if(z<nz||z>fz) continue;
+        const s=sc(z);
+        const h=(i%2)?2.3:1.4;
+        const bx=px(X,z,s), by=py(z,s,0);
+        ctx.fillStyle=B.rail;
+        ctx.fillRect(bx-.5*PPU*s*Math.abs(side),by-h*PPU*s,Math.max(2,1.0*PPU*s),h*PPU*s);
+        ctx.fillStyle='rgba(0,0,0,.25)';
+        ctx.fillRect(bx-.5*PPU*s*Math.abs(side),by-h*PPU*s,Math.max(1,1.0*PPU*s),Math.max(1,.14*PPU*s));
+      }
+    }else if(B.edge==='posts'){
+      // Holzpfosten mit durchhängendem Seil
+      const off=dist%4;
+      ctx.strokeStyle='rgba(150,120,80,.5)'; ctx.lineWidth=Math.max(1,1.4*sc(20));
+      ctx.beginPath();
+      for(let z=fz;z>=nz;z-=2){ const s=sc(z); ctx.lineTo(px(X,z,s),py(z,s,1.05+Math.sin(z*.7)*.12)); }
+      ctx.stroke();
+      for(let i=0;i<34;i++){
+        const z=i*4-off; if(z<nz||z>fz) continue;
+        const s=sc(z);
+        const bx=px(X,z,s), by=py(z,s,0);
+        ctx.fillStyle=B.rail;
+        ctx.fillRect(bx-.14*PPU*s,by-1.5*PPU*s,Math.max(2,.28*PPU*s),1.6*PPU*s);
+      }
+    }else if(B.edge==='fence'){
+      const off=dist%5;
+      for(let i=0;i<28;i++){
+        const z=i*5-off; if(z<nz||z>fz) continue;
+        const s=sc(z);
+        const bx=px(X,z,s), by=py(z,s,0);
+        ctx.fillStyle=B.rail;
+        ctx.fillRect(bx-.1*PPU*s,by-1.1*PPU*s,Math.max(1.5,.2*PPU*s),1.2*PPU*s);
+      }
+      ctx.strokeStyle='rgba(120,140,100,.45)'; ctx.lineWidth=Math.max(1,1.2*sc(20));
+      for(const h of [.95,.6]){
+        ctx.beginPath();
+        for(let z=fz;z>=nz;z-=4){ const s=sc(z); ctx.lineTo(px(X,z,s),py(z,s,h)); }
+        ctx.stroke();
+      }
+    }
+
+    // Lichtquellen: Laterne, Fackel oder Hängelampe
+    if(B.light!=='none'){
+      const GAP=B.light==='torch'?18:26;
+      const lo=dist%GAP;
+      for(let i=0;i<8;i++){
+        const z=i*GAP-lo+6;
+        if(z<nz||z>fz) continue;
+        const s=sc(z);
+        const bx=px(X,z,s), by=py(z,s,0);
+        const hgt=B.light==='torch'?2.6:6;
+        ctx.fillStyle=B.light==='torch'?'#4A3A2A':'#38465A';
+        ctx.fillRect(bx-.1*PPU*s,by-hgt*PPU*s,.2*PPU*s,hgt*PPU*s);
+        const gx=bx-side*(B.light==='torch'?.3:1.1)*PPU*s, gy=by-hgt*PPU*s;
+        const flicker=(B.light==='torch'?.55:.5)+Math.sin(tAcc*(B.light==='torch'?11:7)+i*3)*(B.light==='torch'?.16:.06);
+        const halo=ctx.createRadialGradient(gx,gy,0,gx,gy,3.4*PPU*s);
+        halo.addColorStop(0,'rgba('+B.lamp+','+flicker+')');
+        halo.addColorStop(1,'rgba('+B.lamp+',0)');
+        ctx.fillStyle=halo;
+        ctx.beginPath(); ctx.arc(gx,gy,3.4*PPU*s,0,6.284); ctx.fill();
+        ctx.fillStyle='rgba('+B.lamp+',.05)';
+        ctx.beginPath();
+        ctx.ellipse(px(X-side*1.1,z,s),by,2.6*PPU*s,.7*PPU*s,0,0,6.284);
+        ctx.fill();
+        if(B.reflect){
+          const rz=Math.max(-3,z-9), rs=sc(rz);
+          const refl=ctx.createLinearGradient(0,by,0,py(rz,rs,0));
+          refl.addColorStop(0,'rgba('+B.lamp+',.16)');
+          refl.addColorStop(1,'rgba('+B.lamp+',0)');
+          ctx.fillStyle=refl;
+          ctx.beginPath();
+          ctx.moveTo(px(X-side*1.5,z,s),by);
+          ctx.lineTo(px(X-side*0.7,z,s),by);
+          ctx.lineTo(px(X-side*1.6,rz,rs),py(rz,rs,0));
+          ctx.lineTo(px(X-side*2.6,rz,rs),py(rz,rs,0));
+          ctx.closePath(); ctx.fill();
+        }
+      }
+    }
+  }
 }
 
 function drawZombie(zb){
@@ -1702,6 +1913,20 @@ function drawBossBar(){
   ctx.fillRect(bx,by,bw*p,10);
 }
 
+function drawSector(){
+  if(sectorT<=0) return;
+  const a=Math.min(1,sectorT/0.6)*Math.min(1,(3.0-sectorT)/0.3);
+  ctx.globalAlpha=Math.max(0,a);
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillStyle='rgba(237,242,247,.5)';
+  ctx.font='700 '+Math.max(9,W*.026)+'px system-ui,sans-serif';
+  ctx.fillText('SEKTOR '+(bossIdx+1),W/2,H*.30);
+  ctx.fillStyle='#F5C542';
+  ctx.font='900 '+Math.max(20,W*.072)+'px "Arial Narrow",system-ui,sans-serif';
+  ctx.fillText(BIOMES[biome].name,W/2,H*.30+Math.max(20,W*.058));
+  ctx.globalAlpha=1;
+}
+
 function drawWarning(){
   if(warnT<=0) return;
   const a=Math.min(1,warnT)*(Math.sin(tAcc*14)>0?1:.35);
@@ -1899,6 +2124,7 @@ function render(t){
   ctx.fillStyle=v; ctx.fillRect(0,0,W,H);
   drawBossBar();
   drawWarning();
+  drawSector();
   drawPressure();
   drawBuffs();
   ctx.restore();
