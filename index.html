@@ -113,8 +113,9 @@
     <ol id="scoreList" hidden></ol>
     <p class="rules" id="rules">
       Finger oder Maus steuert den Trupp, geschossen wird von allein.<br><br>
-      <b>Grüne Tore musst du freischießen</b> – erst wenn die Panzerung durch ist,
-      rückt die Verstärkung ein. <span class="bad">Rote Tore werden durch Beschuss schlimmer.</span><br><br>
+      <b>Jedes Tor hat eine Panzerung.</b> Schieß sie weg: Grün bringt dann Verstärkung,
+      <span class="bad">Rot verschwindet als Gefahr</span>. Wer nicht schießt, muss ausweichen –
+      ein intaktes rotes Tor kostet beim Durchlaufen Soldaten.<br><br>
       Zombies beißen sich am Trupp fest und fressen ihn auf. Solange sie dranhängen,
       steht ihr still. <span class="bad">Stacheln töten jeden Soldaten, der darüberläuft.</span>
     </p>
@@ -406,18 +407,18 @@ addEventListener('keydown',e=>{
 addEventListener('keyup',e=>keys[e.key]=false);
 
 // ================================================================ Spawner
-// Gute Tore müssen freigeschossen werden: erst wenn die Panzerung durch ist,
-// löst sich das Tor auf und die Verstärkung rückt sofort ein.
-// Rote Tore bleiben stehen und werden durch Beschuss nur schlimmer.
+// Alle Tore funktionieren gleich: sie haben eine Panzerung, die man wegschießen
+// kann - dann lösen sie sich auf. Grün bringt beim Aufbrechen Verstärkung,
+// Rot verschwindet einfach als Gefahr. Wer nicht schießt, muss ausweichen.
 function makePanel(good, tier){
   if(good){
     if(Math.random()<.16) return { op:'*', v:2, hits:0, need:30, good:true };
     const v=Math.round(rnd(3,6+tier*2));
     return { op:'+', v:v, hits:0, need:5+v*2, good:true };
   }
-  return Math.random()<.32
-    ? { op:'/', v:2, hits:0, good:false }
-    : { op:'-', v:Math.round(rnd(6,12+tier*3)), hits:0, good:false };
+  if(Math.random()<.32) return { op:'/', v:2, hits:0, need:26, good:false };
+  const v=Math.round(rnd(6,12+tier*3));
+  return { op:'-', v:v, hits:0, need:6+Math.round(v*1.6), good:false };
 }
 function spawnGate(){
   const tier=dist/650;
@@ -438,14 +439,14 @@ function spawnGate(){
 }
 let zid=0;
 function spawnWave(){
-  const n=Math.min(30, 5+Math.floor(dist/110));
-  const hp=1+Math.floor(dist/300);
+  const n=Math.min(42, 5+Math.floor(dist/70));
+  const hp=1+Math.floor(dist/150);
   for(let i=0;i<n;i++){
     zombies.push({
       id:++zid,
       x:rnd(-ROAD+.8,ROAD-.8),
       z:SPAWN_Z+Math.floor(i/5)*3.0+rnd(0,1.4),
-      hp:hp,max:hp,big:false,sp:rnd(2.6,4.4),ph:Math.random()*6.28,hit:0,feed:0
+      hp:hp,max:hp,big:false,sp:rnd(3.2,5.2),ph:Math.random()*6.28,hit:0,feed:0
     });
   }
   if(dist>300 && Math.random()<.35){
@@ -515,7 +516,7 @@ function update(dt){
   overrunT=Math.max(0,overrunT-dt);
 
   if(dist>nextGate){ spawnGate(); nextGate+=rnd(100,150); }
-  if(dist>nextWave){ spawnWave(); nextWave+=Math.max(34, rnd(65,90)-dist/40) * (boss?1.8:1); }
+  if(dist>nextWave){ spawnWave(); nextWave+=Math.max(24, rnd(55,80)-dist/30) * (boss?1.8:1); }
   if(dist>nextCrate && weap<WEAPONS.length-1){ spawnCrate(); nextCrate+=rnd(340,430); }
   if(dist>nextTrap){ spawnTrap(); nextTrap+=Math.max(55, rnd(115,165)-dist/30); }
   if(dist>nextBoss && !boss){ spawnBoss(); nextBoss+=rnd(780,980); }
@@ -528,7 +529,10 @@ function update(dt){
     fireT=w.rate; flashT=.05;
     SFX.shot();
     const pos=formation();
-    const shooters=Math.min(pos.length,8);
+    // Schuetzen gleichmaessig ueber die ganze Formation verteilen, damit auch
+    // Ziele in der Mitte beschossen werden und nicht nur die linke Flanke feuert
+    const shooters=Math.min(pos.length, 14, 4+Math.floor(pos.length/10));
+    const stride=pos.length/shooters;
     // Hülsen und Rauch am vordersten Schützen
     if(pos.length){
       casings.push({x:pos[0][0]+.3, y:1.0, z:pos[0][1], vx:rnd(.6,1.6), vy:rnd(1.4,2.4), t:.9, rot:rnd(0,6)});
@@ -537,9 +541,10 @@ function update(dt){
         parts.push({x:pos[0][0]+.7,z:pos[0][1]+.5,t:.35,r:rnd(.2,.4),c:'rgba(200,200,200,.5)',kind:'smoke'});
     }
     for(let i=0;i<shooters;i++){
+      const sp0=pos[Math.min(pos.length-1, Math.round(i*stride))];
       for(let p=0;p<w.pellets;p++){
         bullets.push({
-          x:pos[i][0], z:.5+pos[i][1], dmg:w.dmg, col:w.color,
+          x:sp0[0], z:.5+sp0[1], dmg:w.dmg, col:w.color,
           vx:w.spread?rnd(-w.spread,w.spread):0,
           sp:w.speed||72, pierce:!!w.pierce, splash:w.splash||0,
           range:w.range||0, glow:w.glow||'255,220,120', hitIds:null
@@ -551,11 +556,17 @@ function update(dt){
   // Geschosse
   for(let i=bullets.length-1;i>=0;i--){
     const b=bullets[i];
+    const pz=b.z;                 // Position vor dem Schritt
+    b.pz=pz;
     b.z+=b.sp*dt; b.x+=b.vx*dt;
+    // Schnelle Geschosse legen pro Frame mehrere Meter zurueck. Deshalb wird
+    // die gesamte zurueckgelegte Strecke geprueft, nicht nur der Endpunkt.
+    const zLo=Math.min(pz,b.z), zHi=Math.max(pz,b.z);
+    const sweep=(tz,r)=> zLo-r<=tz && tz<=zHi+r;
     let gone=b.z>SPAWN_Z+12||Math.abs(b.x)>ROAD+1||(b.range&&b.z>b.range);
 
     if(!gone) for(const g of gates){
-      if(g.done||Math.abs(b.z-g.z)>1.6) continue;
+      if(g.done||!sweep(g.z,1.0)) continue;
       const pi=g.panels.findIndex(pa=>b.x>=pa.x0&&b.x<pa.x1);
       if(pi>=0){
         hitPanel(g,pi,b.x);
@@ -565,7 +576,7 @@ function update(dt){
     }
     if(!gone) for(let j=crates.length-1;j>=0;j--){
       const cr=crates[j];
-      if(Math.abs(b.z-cr.z)<1.4&&Math.abs(b.x-cr.x)<1.1){
+      if(sweep(cr.z,1.0)&&Math.abs(b.x-cr.x)<1.1){
         cr.hp-=b.dmg; cr.hit=.12; gone=true;
         parts.push({x:b.x,z:cr.z,t:.2,r:.4,c:'#56E39F',kind:'spark'});
         if(cr.hp<=0){
@@ -582,7 +593,7 @@ function update(dt){
     if(!gone) for(let j=zombies.length-1;j>=0;j--){
       const zb=zombies[j];
       const rad=zb.big?1.6:.85;
-      if(Math.abs(b.z-zb.z)<rad&&Math.abs(b.x-zb.x)<rad*.8){
+      if(sweep(zb.z,rad)&&Math.abs(b.x-zb.x)<rad*.8){
         if(b.pierce){
           if(!b.hitIds) b.hitIds=[];
           if(b.hitIds.indexOf(zb.id)>=0) continue;   // pro Zombie nur einmal
@@ -873,7 +884,8 @@ function updateBoss(dt){
   // Beschuss durch die Truppe
   for(let i=bullets.length-1;i>=0;i--){
     const bl=bullets[i];
-    if(Math.abs(bl.z-b.z)<2.2 && Math.abs(bl.x-b.x)<1.7){
+    const blo=Math.min(bl.pz===undefined?bl.z:bl.pz, bl.z), bhi=Math.max(bl.pz===undefined?bl.z:bl.pz, bl.z);
+    if(blo-2.2<=b.z && b.z<=bhi+2.2 && Math.abs(bl.x-b.x)<1.7){
       if(bl.pierce){
         if(!bl.hitIds) bl.hitIds=[];
         if(bl.hitIds.indexOf('boss')>=0) continue;
@@ -909,19 +921,20 @@ function hurtZombie(idx,dmg,hx){
 function hitPanel(g,pi,hx){
   const pa=g.panels[pi], p=pa.p;
   p.hits++;
+  parts.push({x:hx,z:g.z,t:.2,r:.45,c:p.good?'#B9FFDD':'#FF8A73',kind:'spark'});
+  if(p.hits<p.need) return;
+  // Panzerung durch: das Tor zerspringt
+  const gx=(pa.x0+pa.x1)/2;
   if(p.good){
-    parts.push({x:hx,z:g.z,t:.2,r:.45,c:'#B9FFDD',kind:'spark'});
-    if(p.hits>=p.need){
-      // Tor aufgebrochen: Verstärkung rückt sofort ein, das Tor verschwindet
-      openGate(p,(pa.x0+pa.x1)/2,g.z);
-      g.panels.splice(pi,1);
-      if(!g.panels.length) g.done=true;
-    }
+    openGate(p,gx,g.z);
   }else{
-    parts.push({x:hx,z:g.z,t:.2,r:.45,c:'#FF8A73',kind:'spark'});
-    if(p.op==='-' && p.hits%3===0){ p.v++; SFX.tickBad(); }
-    else if(p.op==='/' && p.hits%16===0){ p.v=Math.min(4,p.v+1); SFX.tickBad(); }
+    SFX.tickBad();
+    floats.push({x:gx,z:Math.max(g.z,1),t:1.0,txt:'ZERSTÖRT',c:'#FF9C8A'});
+    for(let k=0;k<22;k++)
+      parts.push({x:gx+rnd(-2,2),z:g.z+rnd(-.8,.8),t:rnd(.25,.7),r:rnd(.2,.7),c:k%2?'#FF8A73':'#E8462B',kind:'shard'});
   }
+  g.panels.splice(pi,1);
+  if(!g.panels.length) g.done=true;
 }
 
 function openGate(p,gx,gz){
@@ -1371,10 +1384,18 @@ function drawGate(g){
         ctx.stroke();
       }
     }else{
-      const need=pa.p.op==='-'?3:16;
-      const fill=(pa.p.hits%need)/need;
-      ctx.fillStyle='rgba('+base+',.34)';
-      ctx.fillRect(x0,yb-(yb-yt)*fill,x1-x0,(yb-yt)*fill);
+      const p=Math.min(1,pa.p.hits/pa.p.need);
+      ctx.fillStyle='rgba('+base+',.30)';
+      ctx.fillRect(x0,yb-(yb-yt)*p,x1-x0,(yb-yt)*p);
+      ctx.strokeStyle='rgba(255,199,187,'+(0.15+p*.5)+')'; ctx.lineWidth=Math.max(1,1.4*s);
+      const cx=(x0+x1)/2, cy=(yt+yb)/2;
+      const cracks=Math.floor(p*6);
+      for(let i=0;i<cracks;i++){
+        const a=i/6*6.284+0.4;
+        ctx.beginPath(); ctx.moveTo(cx,cy);
+        ctx.lineTo(cx+Math.cos(a)*(x1-x0)*.42, cy+Math.sin(a)*(yb-yt)*.42);
+        ctx.stroke();
+      }
     }
 
     ctx.strokeStyle='rgba('+base+',.9)'; ctx.lineWidth=Math.max(1,2*s);
@@ -1389,13 +1410,12 @@ function drawGate(g){
     ctx.textAlign='center'; ctx.textBaseline='middle';
     ctx.fillText(sym+pa.p.v,(x0+x1)/2,(yt+yb)/2-((yb-yt)*.06));
     ctx.font='700 '+Math.max(7,.36*PPU*s)+'px system-ui,sans-serif';
-    if(good){
-      const left=Math.max(0,pa.p.need-pa.p.hits);
-      ctx.fillStyle='rgba(185,255,221,.85)';
-      ctx.fillText(left+' TREFFER',(x0+x1)/2,yb-(yb-yt)*.14);
-    }else{
-      ctx.fillStyle='rgba(255,199,187,.8)';
-      ctx.fillText('NICHT SCHIESSEN',(x0+x1)/2,yt+(yb-yt)*.16);
+    const left=Math.max(0,pa.p.need-pa.p.hits);
+    ctx.fillStyle=good?'rgba(185,255,221,.85)':'rgba(255,199,187,.85)';
+    ctx.fillText(left+' TREFFER',(x0+x1)/2,yb-(yb-yt)*.14);
+    if(!good){
+      ctx.fillStyle='rgba(255,199,187,.75)';
+      ctx.fillText('NICHT DURCHLAUFEN',(x0+x1)/2,yt+(yb-yt)*.14);
     }
   }
 }
@@ -1745,7 +1765,7 @@ function gameOver(reason){
   const isNew = qualifies(m) && (!scores.length || m>scores[0].m);
   kickEl.textContent='Der Trupp ist aufgefressen';
   titleEl.innerHTML='Aufgefressen<em>bei Meter '+m+'</em>';
-  rulesEl.innerHTML='Tipp: <b>grüne Tore freischießen</b>, sonst bringen sie nichts. Und <span class="bad">Stacheln töten genau den Teil des Trupps, der darüberläuft</span> – schmal drüber, nicht breit.';
+  rulesEl.innerHTML='Tipp: <b>Tore lassen sich alle wegschießen</b> – grün für Verstärkung, rot um die Gefahr loszuwerden. <span class="bad">Stacheln töten genau den Teil des Trupps, der darüberläuft.</span>';
   scoreEl.hidden=false; scoreEl.textContent=m+' m';
   bestEl.hidden=false;
   bestEl.innerHTML = isNew
