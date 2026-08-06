@@ -410,17 +410,22 @@ addEventListener('keyup',e=>keys[e.key]=false);
 // Alle Tore funktionieren gleich: sie haben eine Panzerung, die man wegschießen
 // kann - dann lösen sie sich auf. Grün bringt beim Aufbrechen Verstärkung,
 // Rot verschwindet einfach als Gefahr. Wer nicht schießt, muss ausweichen.
+function armorFactor(){
+  // An die aktuelle Feuerkraft gekoppelt, damit Tore in jeder Spielphase zaehlen
+  return Math.max(.5, Math.min(2.0, .5 + squad*.075));
+}
 function makePanel(good, tier){
+  const af=armorFactor();
   if(good){
-    if(Math.random()<.16) return { op:'*', v:2, hits:0, need:30, good:true };
+    if(Math.random()<.16) return { op:'*', v:2, hits:0, need:Math.round(30*af), good:true };
     const v=Math.round(rnd(3,6+tier*2));
-    return { op:'+', v:v, hits:0, need:5+v*2, good:true };
+    return { op:'+', v:v, hits:0, need:Math.round((5+v*2)*af), good:true };
   }
   // Rote Tore sind stark gepanzert: Streufeuer allein zündet sie nicht,
   // aber wer draufhält, jagt sich die Ladung selbst in den Trupp.
-  if(Math.random()<.32) return { op:'/', v:2, hits:0, need:48, good:false };
+  if(Math.random()<.32) return { op:'/', v:2, hits:0, need:Math.round(48*af), good:false };
   const v=Math.round(rnd(6,12+tier*3));
-  return { op:'-', v:v, hits:0, need:22+v*3, good:false };
+  return { op:'-', v:v, hits:0, need:Math.round((22+v*3)*af), good:false };
 }
 function spawnGate(){
   const tier=dist/650;
@@ -495,9 +500,12 @@ function spawnTrap(){
 function spawnBoss(){
   const b=BOSSES[bossIdx % BOSSES.length];
   bossIdx++;
-  const hp=Math.round(b.hpF + dist/b.hpD*10);
+  // Je 1000 Meter legt ein Boss 10 % an Größe und Lebenspunkten zu
+  const g=Math.pow(1.1, dist/1000);
+  const hp=Math.round((b.hpF + dist/b.hpD*10) * g);
   boss={
     kind:b.kind, name:b.name, col:b.col, head:b.head,
+    size:Math.min(2.8,g), stage:bossIdx,
     x:0, z:52, hp:hp, max:hp, t:0, atk:2, state:'move', st:0, hit:0, ph:0
   };
   warnT=2.2;
@@ -758,7 +766,7 @@ function updateTraps(dt){
       if(nearSquad && Math.abs(tr.x-squadX)<1.3 && tr.pcd<=0){
         tr.pcd=.35; hurtSquad(2,squadX); SFX.saw();
       }
-      if(boss && Math.abs(boss.z-tr.z)<1.8 && Math.abs(boss.x-tr.x)<1.8) hurtBoss(30*dt);
+      if(boss && Math.abs(boss.z-tr.z)<1.8*(boss.size||1) && Math.abs(boss.x-tr.x)<1.8*(boss.size||1)) hurtBoss(30*dt);
 
     }else if(tr.type==='fire'){
       tr.ph+=dt;
@@ -772,7 +780,7 @@ function updateTraps(dt){
         if(nearSquad && Math.abs(tr.x-squadX)<1.4 && tr.pcd<=0){
           tr.pcd=.4; hurtSquad(2,squadX); SFX.flame();
         }
-        if(boss && Math.abs(boss.z-tr.z)<2 && Math.abs(boss.x-tr.x)<2) hurtBoss(12*dt);
+        if(boss && Math.abs(boss.z-tr.z)<2*(boss.size||1) && Math.abs(boss.x-tr.x)<2*(boss.size||1)) hurtBoss(12*dt);
       }
 
     }else if(tr.type==='spikes'){
@@ -832,7 +840,7 @@ function killBoss(){
   decals.push({x:b.x,z:b.z,r:2.6,a:.6});
   dying.push({x:b.x,z:b.z,t:.7,max:.7,big:true,dir:Math.random()<.5?-1:1,ph:0});
   // Belohnung: Verstärkung + garantierte Waffenkiste
-  const bonus=Math.min(12, SQUAD_CAP-squad);
+  const bonus=Math.min(Math.round(12*(b.size||1)), SQUAD_CAP-squad);
   if(bonus>0){ squad+=bonus; floats.push({x:squadX,z:1.6,t:1.4,txt:'+'+bonus+' VERSTÄRKUNG',c:'#56E39F'}); }
   if(weap<WEAPONS.length-1){
     const hp=24+Math.floor(dist/90);
@@ -888,8 +896,8 @@ function updateBoss(dt){
   b.z -= approach*dt;
 
   // Erreicht der Boss die Linie, kostet das schwer - danach wird er zurückgeworfen
-  if(b.z<1.6){
-    hurtSquad(Math.min(squad,14), squadX, 'ÜBERROLLT');
+  if(b.z<1.2+1.0*(b.size||1)){
+    hurtSquad(Math.min(squad-1, Math.max(3, Math.min(Math.round(squad*.45), Math.round(14*(b.size||1))))), squadX, 'ÜBERROLLT');
     b.z=26; b.state='move'; b.st=0;
     shake=.55;
     if(squad<=0) return;
@@ -899,7 +907,8 @@ function updateBoss(dt){
   for(let i=bullets.length-1;i>=0;i--){
     const bl=bullets[i];
     const blo=Math.min(bl.pz===undefined?bl.z:bl.pz, bl.z), bhi=Math.max(bl.pz===undefined?bl.z:bl.pz, bl.z);
-    if(blo-2.2<=b.z && b.z<=bhi+2.2 && Math.abs(bl.x-b.x)<1.7){
+    const bs=b.size||1;
+    if(blo-2.2*bs<=b.z && b.z<=bhi+2.2*bs && Math.abs(bl.x-b.x)<1.7*bs){
       if(bl.pierce){
         if(!bl.hitIds) bl.hitIds=[];
         if(bl.hitIds.indexOf('boss')>=0) continue;
@@ -1563,7 +1572,7 @@ function drawBossShot(s0){
 
 function drawBoss(b){
   const s=sc(b.z); if(s<=.02) return;
-  const u=PPU*s*3.1;
+  const u=PPU*s*3.1*(b.size||1);
   const x=px(b.x,b.z,s), y=py(b.z,s,0);
   const step=Math.sin(b.ph), sway=Math.sin(b.ph*.5)*.06*u;
   const flash=b.hit>0;
@@ -1628,6 +1637,11 @@ function drawBossBar(){
   ctx.font='900 11px "Arial Narrow",system-ui,sans-serif';
   ctx.textAlign='center'; ctx.textBaseline='middle';
   ctx.fillText(boss.name,W/2,by-10);
+  if(boss.size>1.02){
+    ctx.font='700 9px ui-monospace,Menlo,monospace';
+    ctx.fillStyle='rgba(255,199,187,.6)';
+    ctx.fillText('STUFE '+boss.stage+'  ×'+boss.size.toFixed(2),W/2,by+18);
+  }
   ctx.fillStyle='rgba(0,0,0,.6)';
   ctx.fillRect(bx,by,bw,10);
   const p=Math.max(0,boss.hp/boss.max);
