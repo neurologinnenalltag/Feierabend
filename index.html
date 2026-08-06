@@ -504,12 +504,13 @@ function spawnWave(){
       x:rnd(-ROAD+.6,ROAD-.6),
       z:SPAWN_Z+rnd(0,14)+Math.floor(i/6)*2.6,
       hp:hp,max:hp,big:false,sp:rnd(3.2,5.2),ph:Math.random()*6.28,hit:0,feed:0,
-      wob:Math.random()*6.28, wobA:rnd(.6,2.0), drift:rnd(-.5,.5)
+      wob:Math.random()*6.28, wobA:rnd(.6,2.0), drift:rnd(-.5,.5),
+      offN:rnd(-1,1), anchor:rnd(.9,2.0)
     });
   }
   if(dist>700 && Math.random()<.35){
     const bh=18+Math.floor(dist/60);
-    zombies.push({id:++zid,x:rnd(-3,3),z:SPAWN_Z+8,hp:bh,max:bh,big:true,sp:2.0,ph:0,hit:0,feed:0,wob:Math.random()*6.28,wobA:.5,drift:0});
+    zombies.push({id:++zid,x:rnd(-3,3),z:SPAWN_Z+8,hp:bh,max:bh,big:true,sp:2.0,ph:0,hit:0,feed:0,wob:Math.random()*6.28,wobA:.5,drift:0,offN:rnd(-.45,.45),anchor:rnd(1.0,1.6)});
     SFX.boss();
   }
 }
@@ -712,8 +713,8 @@ function update(dt){
 
     if(zb.feed>0){
       // Festgebissen: der Zombie bleibt an der Linie und frisst sich durch den Trupp
-      zb.z += (1.2-zb.z)*Math.min(1,4*dt);
-      zb.x += (squadX-zb.x)*Math.min(1,2.2*dt);
+      zb.z += ((zb.anchor||1.2)-zb.z)*Math.min(1,4*dt);
+      zb.x += ((squadX+zb.offN*(squadHalf()+1.4))-zb.x)*Math.min(1,1.6*dt);
       zb.ph += dt*7;
       zb.feed -= dt;
       if(zb.feed<=0){
@@ -732,7 +733,8 @@ function update(dt){
     // rund 30 Metern nimmt sie den Trupp gezielt ins Visier.
     const lock=Math.max(0, Math.min(1, (32-zb.z)/20));
     const home=lock*lock*4.2;
-    const dxs=squadX-zb.x;
+    const front=squadHalf()+2.2;
+    const dxs=(squadX+zb.offN*front)-zb.x;
     zb.x += Math.sign(dxs)*Math.min(Math.abs(dxs), home*dt);
     // Schlingern und seitliches Abdriften, das beim Anvisieren ausklingt
     const loose=1-lock;
@@ -740,7 +742,7 @@ function update(dt){
     zb.x = Math.max(-ROAD+.4, Math.min(ROAD-.4, zb.x));
 
     // erreicht er den Trupp, beißt er sich fest
-    if(zb.z<1.6 && Math.abs(zb.x-squadX)<3.0 && squad>0){
+    if(zb.z<1.6 && Math.abs(zb.x-squadX)<squadHalf()+2.8 && squad>0){
       zb.feed=.45;
       decals.push({x:zb.x,z:1.2,r:.9,a:.45});
       if(decals.length>40) decals.shift();
@@ -979,7 +981,7 @@ function updateBoss(dt){
     if(b.st>3.0){
       b.st=0; SFX.bossRoar();
       for(let k=0;k<3;k++)
-        zombies.push({id:++zid,x:b.x+rnd(-2,2),z:b.z-1.5,hp:2,max:2,big:false,sp:rnd(4,5.5),ph:Math.random()*6.28,hit:0,feed:0,wob:Math.random()*6.28,wobA:1.2,drift:rnd(-.4,.4)});
+        zombies.push({id:++zid,x:b.x+rnd(-2,2),z:b.z-1.5,hp:2,max:2,big:false,sp:rnd(4,5.5),ph:Math.random()*6.28,hit:0,feed:0,wob:Math.random()*6.28,wobA:1.2,drift:rnd(-.4,.4),offN:rnd(-.9,.9),anchor:rnd(.9,1.9)});
     }
   }
 
@@ -1107,6 +1109,14 @@ function formation(){
     out.push([squadX+(col-(cnt-1)/2)*sx+jitter, -row*sz]);
   }
   return out;
+}
+
+// Halbe Breite der Formation - danach richtet sich die Angriffsfront der Horde
+function squadHalf(){
+  const n=Math.max(1,Math.min(squad,SQUAD_CAP));
+  const perRow=Math.max(3,Math.min(13,Math.ceil(Math.sqrt(n*1.7))));
+  const cnt=Math.min(perRow,n);
+  return (cnt-1)/2*Math.min(.9,10.5/perRow);
 }
 
 // Getroffene Soldaten verschwinden nicht einfach: sie kippen sichtbar um.
