@@ -117,7 +117,9 @@
       <span class="bad">Rote Tore niemals beschießen:</span> zerschießt du sie, zündet die Ladung
       sofort im eigenen Trupp. Durchlaufen kostet genauso. Rot heißt: Feuer einstellen und ausweichen.<br><br>
       Zombies beißen sich am Trupp fest und fressen ihn auf. Solange sie dranhängen,
-      steht ihr still. <span class="bad">Stacheln töten jeden Soldaten, der darüberläuft.</span>
+      steht ihr still. <span class="bad">Stacheln töten jeden Soldaten, der darüberläuft.</span><br><br>
+      <b>Leuchtende Kristalle</b> geben kurzzeitige Verstärkungen – Schnellfeuer, Panzermunition,
+      Streufeuer, Durchschlag, Kälteschock. Neue Waffenklassen gibt es erst ab 1000 m.
     </p>
     <button class="cta" id="btn">Losrennen</button>
   </div>
@@ -346,7 +348,7 @@ function startAmbient(){
 
 // ================================================================ Waffen
 const WEAPONS = [
-  { name:'Pistole',       rate:.28, dmg:1,  pellets:1, spread:0,   color:'#F5C542' },
+  { name:'Pistole',       rate:.24, dmg:1,  pellets:1, spread:0,   color:'#F5C542' },
   { name:'MP',            rate:.15, dmg:1,  pellets:1, spread:0,   color:'#F5C542' },
   { name:'Sturmgewehr',   rate:.10, dmg:2,  pellets:1, spread:0,   color:'#FFE08A' },
   { name:'Schrotflinte',  rate:.24, dmg:2,  pellets:3, spread:2.6, color:'#FFB03A' },
@@ -369,19 +371,31 @@ const BOSSES=[
   { kind:'queen',   name:'DIE BRUTMUTTER',  col:'#5C3A72', head:'#9A6BB8', hpF:30, hpD:40 },
   { kind:'runner',  name:'DER RASENDE',     col:'#2E5C6E', head:'#4E93A8', hpF:26, hpD:48 },
 ];
+// Zeitlich begrenzte Verstärkungen: einsammeln wie Waffenkisten, wirken aber nur kurz.
+// Sie überbrücken die erste Etappe, in der es noch keine neuen Waffenklassen gibt.
+const POWERUPS=[
+  { id:'rate',   name:'SCHNELLFEUER',   dur:12, col:'#F5C542', glow:'245,197,66' },
+  { id:'dmg',    name:'PANZERMUNITION', dur:12, col:'#FF9A2E', glow:'255,154,46' },
+  { id:'spread', name:'STREUFEUER',     dur:12, col:'#7DF9FF', glow:'125,249,255' },
+  { id:'pierce', name:'DURCHSCHLAG',    dur:10, col:'#D6B8FF', glow:'214,184,255' },
+  { id:'frost',  name:'KÄLTESCHOCK',    dur:9,  col:'#9BE7FF', glow:'155,231,255' },
+];
+const WEAPON_START=1000;   // ab hier gibt es überhaupt neue Waffenklassen
+
 let state='menu';
 let squad, weap, dist, speed, squadX, targetX, shake, fireT, flashT, pressure, overrunT;
 let zombies, bullets, gates, crates, parts, floats, dying, decals, clouds, fallen, casings;
-let traps, boss, bossShots, bossIdx, nextBoss, warnT;
+let traps, boss, bossShots, bossIdx, nextBoss, warnT, pups, buffs, nextPup;
 let nextGate, nextWave, nextCrate, nextTrap;
 
 function reset(){
   squad=1; weap=0; dist=0; speed=15; pressure=1; overrunT=0;
   squadX=0; targetX=0; shake=0; fireT=0; flashT=0;
   zombies=[]; bullets=[]; gates=[]; crates=[]; parts=[]; floats=[]; dying=[]; decals=[]; fallen=[]; casings=[];
-  traps=[]; boss=null; bossShots=[]; bossIdx=0; nextBoss=650; warnT=0;
+  traps=[]; boss=null; bossShots=[]; bossIdx=0; nextBoss=1200; warnT=0;
+  pups=[]; buffs={}; nextPup=150;
   clouds=[]; for(let i=0;i<4;i++) clouds.push({x:rnd(0,1),y:rnd(.02,.16),w:rnd(.2,.4),v:rnd(.004,.012)});
-  nextGate=5; nextWave=135; nextCrate=210; nextTrap=250;
+  nextGate=5; nextWave=135; nextCrate=WEAPON_START; nextTrap=250;
   syncHud();
 }
 function syncHud(){
@@ -458,8 +472,8 @@ function spawnGate(){
 }
 let zid=0;
 function spawnWave(){
-  const n=Math.min(42, 5+Math.floor(dist/70));
-  const hp=1+Math.floor(dist/150);
+  const n=Math.min(42, 4+Math.floor(dist/95));
+  const hp=1+Math.floor(dist/240);
   for(let i=0;i<n;i++){
     zombies.push({
       id:++zid,
@@ -468,7 +482,7 @@ function spawnWave(){
       hp:hp,max:hp,big:false,sp:rnd(3.2,5.2),ph:Math.random()*6.28,hit:0,feed:0
     });
   }
-  if(dist>300 && Math.random()<.35){
+  if(dist>700 && Math.random()<.35){
     const bh=18+Math.floor(dist/60);
     zombies.push({id:++zid,x:rnd(-3,3),z:SPAWN_Z+8,hp:bh,max:bh,big:true,sp:2.0,ph:0,hit:0,feed:0});
     SFX.boss();
@@ -478,6 +492,12 @@ function spawnCrate(){
   // Waffen kommen bewusst spät: viel HP, große Abstände
   const hp=22+Math.floor(dist/110);
   crates.push({x:rnd(-3.5,3.5),z:SPAWN_Z,hp:hp,max:hp,hit:0});
+}
+
+function spawnPup(){
+  const t=POWERUPS[Math.floor(Math.random()*POWERUPS.length)];
+  const hp=7+Math.floor(dist/260);
+  pups.push({x:rnd(-4,4), z:SPAWN_Z, hp:hp, max:hp, hit:0, t:t, ph:Math.random()*6.28});
 }
 
 // ---------------------------------------------------------------- Fallen
@@ -539,16 +559,21 @@ function update(dt){
 
   if(dist>nextGate){ spawnGate(); nextGate+=rnd(100,150); }
   if(dist>nextWave){ spawnWave(); nextWave+=Math.max(24, rnd(55,80)-dist/30) * (boss?1.8:1); }
-  if(dist>nextCrate && weap<WEAPONS.length-1){ spawnCrate(); nextCrate+=rnd(250,320); }
+  if(dist>WEAPON_START && dist>nextCrate && weap<WEAPONS.length-1){ spawnCrate(); nextCrate+=rnd(420,560); }
+  if(dist>nextPup){ spawnPup(); nextPup+= dist<WEAPON_START ? rnd(115,170) : rnd(190,265); }
   if(dist>nextTrap){ spawnTrap(); nextTrap+=Math.max(55, rnd(115,165)-dist/30); }
   if(dist>nextBoss && !boss){ spawnBoss(); nextBoss+=rnd(780,980); }
   warnT=Math.max(0,warnT-dt);
 
   // Feuern
   const w=WEAPONS[weap];
+  const bRate = buffs.rate?.55:1;
+  const bDmg  = buffs.dmg?2:1;
+  const bSpread = !!buffs.spread;
+  const bPierce = !!buffs.pierce;
   fireT-=dt;
   if(fireT<=0 && squad>0){
-    fireT=w.rate; flashT=.05;
+    fireT=w.rate*bRate; flashT=.05;
     SFX.shot();
     const pos=formation();
     // Schuetzen gleichmaessig ueber die ganze Formation verteilen, damit auch
@@ -564,11 +589,13 @@ function update(dt){
     }
     for(let i=0;i<shooters;i++){
       const sp0=pos[Math.min(pos.length-1, Math.round(i*stride))];
-      for(let p=0;p<w.pellets;p++){
+      const pellets=w.pellets+(bSpread?2:0);
+      const spr=bSpread?Math.max(w.spread,2.4):w.spread;
+      for(let p=0;p<pellets;p++){
         bullets.push({
-          x:sp0[0], z:.5+sp0[1], dmg:w.dmg, col:w.color,
-          vx:w.spread?rnd(-w.spread,w.spread):0,
-          sp:w.speed||72, pierce:!!w.pierce, splash:w.splash||0,
+          x:sp0[0], z:.5+sp0[1], dmg:w.dmg*bDmg, col:bDmg>1?'#FFB03A':w.color,
+          vx:spr?rnd(-spr,spr):0,
+          sp:w.speed||72, pierce:!!w.pierce||bPierce, splash:w.splash||0,
           range:w.range||0, glow:w.glow||'255,220,120', hitIds:null
         });
       }
@@ -608,6 +635,18 @@ function update(dt){
           floats.push({x:cr.x,z:cr.z,t:1.3,txt:WEAPONS[weap].name.toUpperCase(),c:'#56E39F'});
           for(let k=0;k<16;k++) parts.push({x:cr.x+rnd(-1,1),z:cr.z+rnd(-1,1),t:.5,r:rnd(.2,.6),c:'#56E39F',kind:'spark'});
           syncHud();
+        }
+        break;
+      }
+    }
+    if(!gone) for(let j=pups.length-1;j>=0;j--){
+      const pu=pups[j];
+      if(sweep(pu.z,1.0)&&Math.abs(b.x-pu.x)<1.0){
+        pu.hp-=b.dmg; pu.hit=.12; gone=true;
+        parts.push({x:b.x,z:pu.z,t:.2,r:.4,c:pu.t.col,kind:'spark'});
+        if(pu.hp<=0){
+          pups.splice(j,1);
+          activatePup(pu.t, pu.x, pu.z);
         }
         break;
       }
@@ -652,7 +691,7 @@ function update(dt){
       zb.ph += dt*7;
       zb.feed -= dt;
       if(zb.feed<=0){
-        zb.feed = zb.big?1.5:1.15;
+        zb.feed = (zb.big?1.5:1.15)*(buffs.frost?2.2:1);
         SFX.bite();
         hurtSquad(zb.big?3:1, zb.x);
         for(let k=0;k<6;k++) parts.push({x:zb.x+rnd(-.4,.4),z:zb.z,t:.45,r:rnd(.2,.5),c:'#C4271A',kind:'blood'});
@@ -661,7 +700,7 @@ function update(dt){
       continue;
     }
 
-    zb.z-=(speed+zb.sp)*dt;
+    zb.z-=(speed+zb.sp*(buffs.frost?.35:1))*dt;
     zb.x+=Math.sign(squadX-zb.x)*Math.min(Math.abs(squadX-zb.x),3.4*dt);
     zb.ph+=dt*11;
 
@@ -701,6 +740,12 @@ function update(dt){
   for(let i=floats.length-1;i>=0;i--){ const f=floats[i]; f.t-=dt; f.z-=speed*dt; if(f.t<=0)floats.splice(i,1); }
   for(let i=dying.length-1;i>=0;i--){ const d=dying[i]; d.t-=dt; d.z-=speed*dt; if(d.t<=0)dying.splice(i,1); }
   for(let i=fallen.length-1;i>=0;i--){ const f=fallen[i]; f.t-=dt; f.z-=speed*dt; if(f.t<=0)fallen.splice(i,1); }
+  for(const k in buffs){ buffs[k]-=dt; if(buffs[k]<=0) delete buffs[k]; }
+  for(let i=pups.length-1;i>=0;i--){
+    const pu=pups[i];
+    pu.z-=speed*dt; pu.hit=Math.max(0,pu.hit-dt); pu.ph+=dt*2.2;
+    if(pu.z<-3) pups.splice(i,1);
+  }
   for(let i=casings.length-1;i>=0;i--){
     const c=casings[i];
     c.t-=dt; c.vy-=9*dt; c.y+=c.vy*dt; c.x+=c.vx*dt; c.rot+=dt*9; c.z-=speed*dt;
@@ -713,6 +758,12 @@ function update(dt){
   shake=Math.max(0,shake-dt*1.4);
   flashT=Math.max(0,flashT-dt);
   syncHud();
+}
+
+function spawnPup(){
+  const t=POWERUPS[Math.floor(Math.random()*POWERUPS.length)];
+  const hp=7+Math.floor(dist/260);
+  pups.push({x:rnd(-4,4), z:SPAWN_Z, hp:hp, max:hp, hit:0, t:t, ph:Math.random()*6.28});
 }
 
 // ---------------------------------------------------------------- Fallen-Update
@@ -1664,6 +1715,81 @@ function drawWarning(){
   ctx.globalAlpha=1;
 }
 
+function activatePup(t,x,z){
+  buffs[t.id]=t.dur;
+  SFX.crate();
+  floats.push({x:x,z:Math.max(z,1),t:1.4,txt:t.name,c:t.col});
+  for(let k=0;k<20;k++)
+    parts.push({x:x+rnd(-1.2,1.2),z:z+rnd(-1,1),t:rnd(.25,.6),r:rnd(.2,.6),c:t.col,kind:'spark'});
+  if(t.id==='frost'){
+    for(let k=0;k<24;k++)
+      parts.push({x:rnd(-ROAD,ROAD),z:rnd(0,40),t:rnd(.4,.9),r:rnd(.2,.5),c:'#9BE7FF',kind:'spark'});
+  }
+}
+
+function drawPup(pu){
+  const s=sc(pu.z); if(s<=.02) return;
+  const u=PPU*s;
+  const x=px(pu.x,pu.z,s), y=py(pu.z,s,0);
+  const hover=Math.sin(pu.ph*2)*.18*u;
+  ctx.fillStyle='rgba(0,0,0,.3)';
+  ctx.beginPath(); ctx.ellipse(x,y,u*.45,u*.13,0,0,6.284); ctx.fill();
+  const cy=y-u*1.0+hover;
+  // Aura
+  const halo=ctx.createRadialGradient(x,cy,0,x,cy,u*1.5);
+  halo.addColorStop(0,'rgba('+pu.t.glow+',.35)');
+  halo.addColorStop(1,'rgba('+pu.t.glow+',0)');
+  ctx.fillStyle=halo;
+  ctx.beginPath(); ctx.arc(x,cy,u*1.5,0,6.284); ctx.fill();
+  // rotierender Kristall
+  ctx.save();
+  ctx.translate(x,cy); ctx.rotate(pu.ph);
+  ctx.fillStyle=pu.hit>0?'#FFFFFF':pu.t.col;
+  ctx.beginPath();
+  ctx.moveTo(0,-u*.55); ctx.lineTo(u*.38,0); ctx.lineTo(0,u*.55); ctx.lineTo(-u*.38,0);
+  ctx.closePath(); ctx.fill();
+  ctx.fillStyle='rgba(255,255,255,.45)';
+  ctx.beginPath();
+  ctx.moveTo(0,-u*.55); ctx.lineTo(u*.16,0); ctx.lineTo(0,u*.2); ctx.lineTo(-u*.16,0);
+  ctx.closePath(); ctx.fill();
+  ctx.restore();
+  // Rest-Panzerung
+  const p=pu.hp/pu.max;
+  ctx.fillStyle='rgba(0,0,0,.5)';
+  ctx.fillRect(x-u*.42,cy+u*.75,u*.84,u*.1);
+  ctx.fillStyle=pu.t.col;
+  ctx.fillRect(x-u*.42,cy+u*.75,u*.84*p,u*.1);
+  ctx.fillStyle=pu.t.col;
+  ctx.font='700 '+Math.max(7,.32*PPU*s)+'px system-ui,sans-serif';
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillText(pu.t.name,x,cy-u*.95);
+}
+
+function drawBuffs(){
+  const act=POWERUPS.filter(p=>buffs[p.id]>0);
+  if(!act.length) return;
+  const bw=Math.min(96,W*.26), gap=6;
+  const total=act.length*bw+(act.length-1)*gap;
+  let bx=(W-total)/2, by=H-52;
+  for(const p of act){
+    const rest=Math.max(0,buffs[p.id]/p.dur);
+    ctx.fillStyle='rgba(11,14,19,.7)';
+    ctx.fillRect(bx,by,bw,18);
+    ctx.fillStyle='rgba('+p.glow+',.22)';
+    ctx.fillRect(bx,by,bw*rest,18);
+    ctx.strokeStyle='rgba('+p.glow+',.7)'; ctx.lineWidth=1;
+    ctx.strokeRect(bx+.5,by+.5,bw-1,17);
+    ctx.fillStyle=p.col;
+    ctx.font='700 8px system-ui,sans-serif';
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText(p.name,bx+bw/2,by+6);
+    ctx.font='700 8px ui-monospace,Menlo,monospace';
+    ctx.fillStyle='rgba(237,242,247,.6)';
+    ctx.fillText(buffs[p.id].toFixed(1)+'s',bx+bw/2,by+14);
+    bx+=bw+gap;
+  }
+}
+
 function drawPressure(){
   if(state!=='play') return;
   // Tempoanzeige: wie viel Vorwärtsdrang bleibt
@@ -1697,6 +1823,7 @@ function render(t){
   const items=[];
   for(const g of gates) items.push({z:g.z,d:()=>drawGate(g)});
   for(const cr of crates) items.push({z:cr.z,d:()=>drawCrate(cr)});
+  for(const pu of pups) items.push({z:pu.z,d:()=>drawPup(pu)});
   for(const tr of traps) items.push({z:tr.z,d:()=>drawTrap(tr)});
   for(const zb of zombies) items.push({z:zb.z,d:()=>drawZombie(zb)});
   for(const dy of dying) items.push({z:dy.z,d:()=>drawDying(dy)});
@@ -1763,12 +1890,17 @@ function render(t){
     ctx.globalAlpha=1;
   }
 
+  if(buffs.frost>0){
+    ctx.fillStyle='rgba(120,200,255,'+Math.min(.16,buffs.frost*.05)+')';
+    ctx.fillRect(0,0,W,H);
+  }
   const v=ctx.createRadialGradient(W/2,H*.55,H*.25,W/2,H*.55,H*.85);
   v.addColorStop(0,'rgba(0,0,0,0)'); v.addColorStop(1,'rgba(0,0,0,.55)');
   ctx.fillStyle=v; ctx.fillRect(0,0,W,H);
   drawBossBar();
   drawWarning();
   drawPressure();
+  drawBuffs();
   ctx.restore();
 }
 
