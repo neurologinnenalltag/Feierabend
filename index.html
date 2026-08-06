@@ -55,6 +55,27 @@
   button.cta:active{transform:translateY(2px)}
   button:focus-visible{outline:2px solid var(--lamp);outline-offset:4px}
   @media (prefers-reduced-motion:reduce){button.cta{transition:none}}
+
+  /* ---- Bestenliste ---- */
+  #nameBox{display:flex;flex-direction:column;gap:10px;align-items:center;pointer-events:auto}
+  #nameIn{
+    font-family:ui-monospace,Menlo,monospace;font-size:18px;font-weight:700;letter-spacing:.12em;text-align:center;
+    text-transform:uppercase;background:rgba(11,14,19,.8);color:var(--lamp);
+    border:1px solid rgba(245,197,66,.45);border-radius:2px;padding:12px 14px;width:220px;
+  }
+  #nameIn:focus{outline:none;border-color:var(--toxic);color:var(--toxic)}
+  #nameIn::placeholder{color:rgba(237,242,247,.28);letter-spacing:.12em}
+  button.small{padding:11px 24px;font-size:12px}
+  #scoreList{list-style:none;width:100%;max-width:300px;font-family:ui-monospace,Menlo,monospace;font-size:12.5px;
+    display:flex;flex-direction:column;gap:2px;pointer-events:auto}
+  #scoreList li{display:flex;gap:8px;align-items:baseline;padding:4px 8px;background:rgba(11,14,19,.5);
+    border-left:2px solid rgba(245,197,66,.25);}
+  #scoreList li.me{border-left-color:var(--toxic);background:rgba(86,227,159,.10)}
+  #scoreList .rank{color:rgba(237,242,247,.4);width:22px;text-align:right;flex:none}
+  #scoreList .who{flex:1;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;letter-spacing:.06em}
+  #scoreList .m{color:var(--lamp);flex:none;font-weight:700}
+  #scoreList li.me .m{color:var(--toxic)}
+  .listTitle{font-size:9px;letter-spacing:.3em;text-transform:uppercase;color:rgba(237,242,247,.45)}
 </style>
 </head>
 <body>
@@ -81,6 +102,15 @@
     <h1 id="title">Brücke<em>der Untoten</em></h1>
     <div class="score" id="scoreLine" hidden>0 m</div>
     <div class="best" id="bestLine" hidden></div>
+
+    <div id="nameBox" hidden>
+      <div class="listTitle">Name für die Bestenliste</div>
+      <input id="nameIn" maxlength="12" placeholder="ANONYM" autocomplete="off" spellcheck="false">
+      <button class="cta small" id="saveBtn">Eintragen</button>
+    </div>
+
+    <div class="listTitle" id="listTitle" hidden>Top 10</div>
+    <ol id="scoreList" hidden></ol>
     <p class="rules" id="rules">
       Finger oder Maus steuert den Trupp, geschossen wird von allein.<br><br>
       <b>Grüne Tore</b> werden durch Beschuss besser –
@@ -111,6 +141,11 @@ const kickEl  = document.getElementById('kicker');
 const rulesEl = document.getElementById('rules');
 const scoreEl = document.getElementById('scoreLine');
 const bestEl  = document.getElementById('bestLine');
+const nameBox = document.getElementById('nameBox');
+const nameIn  = document.getElementById('nameIn');
+const saveBtn = document.getElementById('saveBtn');
+const listEl  = document.getElementById('scoreList');
+const listTitleEl = document.getElementById('listTitle');
 
 let W=0,H=0,PPU=30,HZ=0,BY=0;
 function resize(){
@@ -129,16 +164,65 @@ function px(x,z,s){ return W/2 + x*PPU*s; }
 function py(z,s,h){ return HZ + (BY-HZ)*s - (h||0)*PPU*s; }
 function rnd(a,b){ return a+Math.random()*(b-a); }
 
-// ================================================================ Bestwert (localStorage)
-const BEST_KEY='bdu-best';
-let best=0;
-function loadBest(){
-  try{ best=parseInt(localStorage.getItem(BEST_KEY),10)||0; }catch(e){ best=0; }
+// ================================================================ Bestenliste (localStorage)
+const BEST_KEY='bdu-best', LIST_KEY='bdu-scores', NAME_KEY='bdu-name';
+const TOP_N=10;
+let best=0, scores=[], pendingIdx=-1;
+
+function loadScores(){
+  try{
+    scores=JSON.parse(localStorage.getItem(LIST_KEY))||[];
+    if(!Array.isArray(scores)) scores=[];
+  }catch(e){ scores=[]; }
+  scores=scores.filter(s=>s&&typeof s.m==='number').sort((a,b)=>b.m-a.m).slice(0,TOP_N);
+  best=scores.length?scores[0].m:0;
+  try{ best=Math.max(best,parseInt(localStorage.getItem(BEST_KEY),10)||0); }catch(e){}
   elBestH.textContent = best>0 ? 'Best '+best+' m' : '';
 }
-function saveBest(v){
-  try{ localStorage.setItem(BEST_KEY,String(v)); }catch(e){}
+function saveScores(){
+  try{
+    localStorage.setItem(LIST_KEY,JSON.stringify(scores));
+    localStorage.setItem(BEST_KEY,String(best));
+  }catch(e){}
 }
+function qualifies(m){
+  return m>0 && (scores.length<TOP_N || m>scores[scores.length-1].m);
+}
+// Dopplungen sind ausdrücklich erlaubt: gleicher Name darf mehrfach in der Liste stehen
+function addScore(name,m){
+  const entry={n:(name||'ANONYM').slice(0,12).toUpperCase(),m:m,t:Date.now()};
+  scores.push(entry);
+  scores.sort((a,b)=> b.m-a.m || a.t-b.t);
+  scores=scores.slice(0,TOP_N);
+  pendingIdx=scores.indexOf(entry);
+  best=Math.max(best,m);
+  saveScores();
+  elBestH.textContent='Best '+best+' m';
+}
+function renderScores(){
+  if(!scores.length){ listTitleEl.hidden=true; listEl.hidden=true; return; }
+  listTitleEl.hidden=false; listEl.hidden=false;
+  listEl.innerHTML='';
+  scores.forEach((s,i)=>{
+    const li=document.createElement('li');
+    if(i===pendingIdx) li.className='me';
+    const r=document.createElement('span'); r.className='rank'; r.textContent=(i+1)+'.';
+    const w=document.createElement('span'); w.className='who'; w.textContent=s.n;
+    const m=document.createElement('span'); m.className='m'; m.textContent=s.m+' m';
+    li.append(r,w,m);
+    listEl.appendChild(li);
+  });
+}
+function submitScore(){
+  if(pendingScore<0) return;
+  const nm=(nameIn.value||'').trim()||'ANONYM';
+  try{ localStorage.setItem(NAME_KEY,nm); }catch(e){}
+  addScore(nm,pendingScore);
+  pendingScore=-1;
+  nameBox.hidden=true;
+  renderScores();
+}
+let pendingScore=-1;
 
 // ================================================================ Audio (rein prozedural)
 let AC=null, master, muted=false, noiseBuf=null;
@@ -285,14 +369,14 @@ const BOSSES=[
 ];
 let state='menu';
 let squad, weap, dist, speed, squadX, targetX, shake, fireT, flashT;
-let zombies, bullets, gates, crates, parts, floats, dying, decals, clouds;
+let zombies, bullets, gates, crates, parts, floats, dying, decals, clouds, fallen;
 let traps, boss, bossShots, bossIdx, nextBoss, warnT;
 let nextGate, nextWave, nextCrate, nextTrap;
 
 function reset(){
   squad=1; weap=0; dist=0; speed=15;
   squadX=0; targetX=0; shake=0; fireT=0; flashT=0;
-  zombies=[]; bullets=[]; gates=[]; crates=[]; parts=[]; floats=[]; dying=[]; decals=[];
+  zombies=[]; bullets=[]; gates=[]; crates=[]; parts=[]; floats=[]; dying=[]; decals=[]; fallen=[];
   traps=[]; boss=null; bossShots=[]; bossIdx=0; nextBoss=650; warnT=0;
   clouds=[]; for(let i=0;i<4;i++) clouds.push({x:rnd(0,1),y:rnd(.02,.16),w:rnd(.2,.4),v:rnd(.004,.012)});
   nextGate=50; nextWave=70; nextCrate=260; nextTrap=170;
@@ -314,6 +398,7 @@ cvs.addEventListener('pointerup',()=>pointerDown=false);
 cvs.addEventListener('pointercancel',()=>pointerDown=false);
 const keys={};
 addEventListener('keydown',e=>{
+  if(e.target&&e.target.tagName==='INPUT') return;
   keys[e.key]=true;
   if((e.key===' '||e.key==='Enter')&&state!=='play'){e.preventDefault();start();}
 });
@@ -507,13 +592,11 @@ function update(dt){
     if(zb.z<.7){
       if(Math.abs(zb.x-squadX)<2.6){
         const bite=zb.big?6:1;
-        squad=Math.max(0,squad-bite);
-        shake=.35; SFX.bite(); syncHud();
-        floats.push({x:zb.x,z:.6,t:.7,txt:'-'+bite,c:'#E8462B'});
-        for(let k=0;k<10;k++) parts.push({x:zb.x+rnd(-.5,.5),z:rnd(0,1),t:.5,r:rnd(.2,.6),c:'#E8462B',kind:'blood'});
+        SFX.bite();
+        hurtSquad(bite, zb.x);
       }
       zombies.splice(i,1);
-      if(squad<=0){ gameOver(); return; }
+      if(squad<=0){ return; }
     }
   }
 
@@ -541,6 +624,7 @@ function update(dt){
   for(let i=parts.length-1;i>=0;i--){ const p=parts[i]; p.t-=dt; p.z-=speed*dt*.5; if(p.t<=0)parts.splice(i,1); }
   for(let i=floats.length-1;i>=0;i--){ const f=floats[i]; f.t-=dt; f.z-=speed*dt; if(f.t<=0)floats.splice(i,1); }
   for(let i=dying.length-1;i>=0;i--){ const d=dying[i]; d.t-=dt; d.z-=speed*dt; if(d.t<=0)dying.splice(i,1); }
+  for(let i=fallen.length-1;i>=0;i--){ const f=fallen[i]; f.t-=dt; f.z-=speed*dt; if(f.t<=0)fallen.splice(i,1); }
   for(const d of decals){ d.z-=speed*dt; d.a-=dt*.05; }
   while(decals.length&&(decals[0].a<=0||decals[0].z<-4)) decals.shift();
   for(const cl of clouds){ cl.x+=cl.v*dt; if(cl.x>1.3)cl.x=-.3; }
@@ -551,9 +635,12 @@ function update(dt){
 
 // ---------------------------------------------------------------- Fallen-Update
 function hurtSquad(n,x,txt){
-  squad=Math.max(0,squad-n);
+  const real=Math.min(n,squad);
+  if(real<=0) return;
+  dropSoldiers(real);
+  squad=Math.max(0,squad-real);
   shake=Math.max(shake,.3);
-  floats.push({x:x,z:1.0,t:.7,txt:txt||('-'+n),c:'#E8462B'});
+  floats.push({x:x,z:1.0,t:.7,txt:txt||('-'+real),c:'#E8462B'});
   for(let k=0;k<9;k++) parts.push({x:x+rnd(-.5,.5),z:rnd(0,1.2),t:.5,r:rnd(.2,.6),c:'#C4271A',kind:'blood'});
   syncHud();
   if(squad<=0) gameOver();
@@ -758,13 +845,16 @@ function chargePanel(p){
 
 function applyOp(p){
   const before=squad;
-  if(p.op==='+') squad+=p.v;
-  else if(p.op==='-') squad=Math.max(0,squad-p.v);
-  else if(p.op==='*') squad=squad*p.v;
-  else if(p.op==='/') squad=Math.floor(squad/p.v);
+  let next=squad;
+  if(p.op==='+') next=squad+p.v;
+  else if(p.op==='-') next=Math.max(0,squad-p.v);
+  else if(p.op==='*') next=squad*p.v;
+  else if(p.op==='/') next=Math.floor(squad/p.v);
   // Ein einzelnes Tor bringt höchstens +20 Soldaten
-  if(squad>before) squad=Math.min(squad, before+GATE_GAIN_CAP);
-  squad=Math.min(SQUAD_CAP,squad);
+  if(next>before) next=Math.min(next, before+GATE_GAIN_CAP);
+  next=Math.min(SQUAD_CAP,next);
+  if(next<before) dropSoldiers(before-next);
+  squad=next;
   const d=squad-before;
   floats.push({x:squadX,z:1.4,t:.9,txt:(d>=0?'+':'')+d,c:d>=0?'#56E39F':'#E8462B'});
   if(d>=0) SFX.gateGood(); else { SFX.gateBad(); shake=.25; }
@@ -772,15 +862,35 @@ function applyOp(p){
   if(squad<=0) gameOver();
 }
 
+// Es werden ALLE Soldaten dargestellt: die Formation wird bei großem Trupp
+// breiter und enger, statt Leute zu verstecken.
 function formation(){
-  const out=[], shown=Math.min(squad,28), perRow=5;
-  for(let i=0;i<shown;i++){
+  const out=[];
+  const n=Math.max(0,Math.min(squad,SQUAD_CAP));
+  if(!n) return out;
+  const perRow=Math.max(3,Math.min(13,Math.ceil(Math.sqrt(n*1.7))));
+  const rows=Math.ceil(n/perRow);
+  const sx=Math.min(.9, 10.5/perRow);
+  const sz=rows>6?.45:.6;
+  for(let i=0;i<n;i++){
     const row=Math.floor(i/perRow);
-    const cnt=Math.min(perRow,shown-row*perRow);
+    const cnt=Math.min(perRow,n-row*perRow);
     const col=i%perRow;
-    out.push([squadX+(col-(cnt-1)/2)*.9, -row*.85]);
+    const jitter=(((i*37)%7)-3)*.035;
+    out.push([squadX+(col-(cnt-1)/2)*sx+jitter, -row*sz]);
   }
   return out;
+}
+
+// Getroffene Soldaten verschwinden nicht einfach: sie kippen sichtbar um.
+function dropSoldiers(k){
+  const pos=formation();          // vor der Reduktion aufrufen
+  const take=Math.min(k,pos.length);
+  for(let i=0;i<take;i++){
+    const p=pos[pos.length-1-i];
+    fallen.push({x:p[0],z:p[1],t:.8,max:.8,dir:Math.random()<.5?-1:1});
+  }
+  if(fallen.length>60) fallen.splice(0,fallen.length-60);
 }
 
 // ================================================================ Zeichnen
@@ -1131,6 +1241,25 @@ function drawCrate(cr){
   ctx.fillText(WEAPONS[Math.min(WEAPONS.length-1,weap+1)].name.toUpperCase(),x,y-u*1.35);
 }
 
+function drawFallen(f){
+  const s=sc(f.z); if(s<=.02) return;
+  const u=PPU*s;
+  const x=px(f.x,f.z,s), y=py(f.z,s,0);
+  const k=1-f.t/f.max;
+  ctx.save();
+  ctx.globalAlpha=Math.max(0,1-k*.75);
+  ctx.translate(x,y);
+  ctx.rotate(f.dir*Math.min(k*2.2,1.55));
+  ctx.fillStyle='#2F4A3C';
+  ctx.fillRect(-u*.24,-u*1.0*(1-k*.45),u*.48,u*.72);
+  ctx.fillStyle='#E7C9A0';
+  ctx.beginPath(); ctx.arc(0,-u*1.12*(1-k*.5),u*.19,0,6.284); ctx.fill();
+  ctx.fillStyle='#243A2E';
+  ctx.beginPath(); ctx.arc(0,-u*1.18*(1-k*.5),u*.22,Math.PI,0); ctx.fill();
+  ctx.restore();
+  ctx.globalAlpha=1;
+}
+
 function drawTrap(tr){
   const s=sc(tr.z); if(s<=.02) return;
   const u=PPU*s;
@@ -1310,6 +1439,7 @@ function render(t){
   for(const tr of traps) items.push({z:tr.z,d:()=>drawTrap(tr)});
   for(const zb of zombies) items.push({z:zb.z,d:()=>drawZombie(zb)});
   for(const dy of dying) items.push({z:dy.z,d:()=>drawDying(dy)});
+  for(const f of fallen) items.push({z:f.z,d:()=>drawFallen(f)});
   for(const s0 of bossShots) items.push({z:s0.z,d:()=>drawBossShot(s0)});
   if(boss) items.push({z:boss.z,d:()=>drawBoss(boss)});
   items.sort((a,b)=>b.z-a.z);
@@ -1376,31 +1506,50 @@ function loop(ts){
 function start(){
   audioInit();
   if(AC&&AC.state==='suspended') AC.resume();
+  // offenen Eintrag automatisch sichern, falls direkt neu gestartet wird
+  if(pendingScore>=0) submitScore();
+  pendingIdx=-1;
+  nameBox.hidden=true; listEl.hidden=true; listTitleEl.hidden=true;
+  scoreEl.hidden=true; bestEl.hidden=true;
   reset(); state='play';
   screenEl.classList.add('hidden');
 }
 function gameOver(){
+  if(state!=='play') return;
   state='over';
   SFX.over();
   const m=dist|0;
-  const isNew = m>best && best>0;
-  best=Math.max(best,m);
-  saveBest(best);
-  elBestH.textContent='Best '+best+' m';
+  const isNew = qualifies(m) && (!scores.length || m>scores[0].m);
   kickEl.textContent='Trupp ausgelöscht';
   titleEl.innerHTML='Überrannt<em>auf Meter '+m+'</em>';
   scoreEl.hidden=false; scoreEl.textContent=m+' m';
   bestEl.hidden=false;
   bestEl.innerHTML = isNew
-    ? '<span class="newbest">Neuer Bestwert!</span> '+best+' m'
-    : 'Bestwert '+best+' m';
-  rulesEl.innerHTML='Merk dir: <span class="bad">rote Tore werden durch Treffer schlimmer</span> – Einzeltore kann man komplett umfahren. Grüne Kisten immer mitnehmen.';
+    ? '<span class="newbest">Neuer Rekord!</span>'
+    : (best>0 ? 'Bestwert '+best+' m' : '');
+  rulesEl.innerHTML='Merk dir: <span class="bad">rote Tore werden durch Treffer schlimmer</span>, und <span class="bad">Fallen treffen deinen Trupp genauso wie die Zombies</span>.';
   btn.textContent='Nochmal';
+
+  if(qualifies(m)){
+    pendingScore=m;
+    nameBox.hidden=false;
+    try{ nameIn.value=localStorage.getItem(NAME_KEY)||''; }catch(e){}
+    setTimeout(()=>{ try{ nameIn.focus(); nameIn.select(); }catch(e){} },60);
+  }else{
+    pendingScore=-1;
+    nameBox.hidden=true;
+  }
+  renderScores();
   screenEl.classList.remove('hidden');
 }
 btn.addEventListener('click',start);
+saveBtn.addEventListener('click',submitScore);
+nameIn.addEventListener('keydown',e=>{
+  e.stopPropagation();
+  if(e.key==='Enter'){ e.preventDefault(); submitScore(); }
+});
 
-resize(); reset(); loadBest();
+resize(); reset(); loadScores(); renderScores(); listEl.hidden=!scores.length; listTitleEl.hidden=!scores.length;
 requestAnimationFrame(loop);
 })();
 </script>
