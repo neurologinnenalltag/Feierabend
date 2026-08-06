@@ -27,6 +27,7 @@
   #distVal{color:var(--lamp)}
   .right{text-align:right}
   #weapon{font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:rgba(237,242,247,.72);margin-top:3px;}
+  #bestHud{font-size:10px;font-family:ui-monospace,Menlo,monospace;color:rgba(237,242,247,.45);margin-top:3px;}
 
   #mute{position:absolute;right:12px;bottom:12px;pointer-events:auto;background:rgba(11,14,19,.55);
     border:1px solid rgba(237,242,247,.2);color:rgba(237,242,247,.75);border-radius:2px;
@@ -43,6 +44,7 @@
   .rules .bad{color:#FF9C8A;font-weight:600}
   .score{font-family:ui-monospace,Menlo,monospace;font-size:44px;font-weight:700;color:var(--lamp);line-height:1}
   .best{font-family:ui-monospace,Menlo,monospace;font-size:13px;color:rgba(237,242,247,.55)}
+  .newbest{color:var(--toxic)}
   button.cta{
     pointer-events:auto;cursor:pointer;font:inherit;font-size:14px;font-weight:700;letter-spacing:.24em;text-transform:uppercase;
     background:var(--toxic);color:#06231a;border:0;border-radius:2px;padding:15px 34px;
@@ -68,6 +70,7 @@
     <div class="stat right">
       <div class="label">Strecke</div>
       <div class="value" id="distVal">0 m</div>
+      <div id="bestHud"></div>
     </div>
   </div>
 
@@ -99,6 +102,7 @@ const ctx = cvs.getContext('2d', { alpha:false });
 const elSquad = document.getElementById('squadVal');
 const elDist  = document.getElementById('distVal');
 const elWeap  = document.getElementById('weapon');
+const elBestH = document.getElementById('bestHud');
 const screenEl= document.getElementById('screen');
 const btn     = document.getElementById('btn');
 const muteBtn = document.getElementById('mute');
@@ -115,7 +119,7 @@ function resize(){
   W=Math.max(1,r.width); H=Math.max(1,r.height);
   cvs.width=Math.round(W*dpr); cvs.height=Math.round(H*dpr);
   ctx.setTransform(dpr,0,0,dpr,0,0);
-  PPU=W*0.062; HZ=H*0.30; BY=H*0.94; sky=null;
+  PPU=W*0.062; HZ=H*0.30; BY=H*0.94; sky=null; stars=null;
 }
 addEventListener('resize', resize, {passive:true});
 
@@ -125,7 +129,18 @@ function px(x,z,s){ return W/2 + x*PPU*s; }
 function py(z,s,h){ return HZ + (BY-HZ)*s - (h||0)*PPU*s; }
 function rnd(a,b){ return a+Math.random()*(b-a); }
 
-// ================================================================ Audio (rein prozedural, Web Audio API)
+// ================================================================ Bestwert (localStorage)
+const BEST_KEY='bdu-best';
+let best=0;
+function loadBest(){
+  try{ best=parseInt(localStorage.getItem(BEST_KEY),10)||0; }catch(e){ best=0; }
+  elBestH.textContent = best>0 ? 'Best '+best+' m' : '';
+}
+function saveBest(v){
+  try{ localStorage.setItem(BEST_KEY,String(v)); }catch(e){}
+}
+
+// ================================================================ Audio (rein prozedural)
 let AC=null, master, muted=false, noiseBuf=null;
 function audioInit(){
   if(AC) return;
@@ -141,22 +156,22 @@ function audioInit(){
   }catch(e){ AC=null; }
 }
 function setMuted(m){
-  muted = m;
+  muted=m;
   muteBtn.textContent = muted ? 'Ton aus' : 'Ton an';
   if(master) master.gain.value = muted ? 0 : .5;
 }
 muteBtn.addEventListener('click', ()=>{ audioInit(); setMuted(!muted); });
 
-function tone(type, f0, f1, t0, dur, vol, dest){
+function tone(type,f0,f1,t0,dur,vol){
   const o=AC.createOscillator(), g=AC.createGain();
   o.type=type; o.frequency.setValueAtTime(f0,t0);
-  if(f1!==f0) o.frequency.exponentialRampToValueAtTime(Math.max(20,f1), t0+dur);
+  if(f1!==f0) o.frequency.exponentialRampToValueAtTime(Math.max(20,f1),t0+dur);
   g.gain.setValueAtTime(vol,t0);
-  g.gain.exponentialRampToValueAtTime(.0001, t0+dur);
-  o.connect(g); g.connect(dest||master);
+  g.gain.exponentialRampToValueAtTime(.0001,t0+dur);
+  o.connect(g); g.connect(master);
   o.start(t0); o.stop(t0+dur+.02);
 }
-function noise(t0, dur, vol, filterType, freq){
+function noise(t0,dur,vol,filterType,freq){
   const s=AC.createBufferSource(); s.buffer=noiseBuf; s.loop=true;
   const f=AC.createBiquadFilter(); f.type=filterType; f.frequency.value=freq;
   const g=AC.createGain();
@@ -167,44 +182,43 @@ function noise(t0, dur, vol, filterType, freq){
 }
 let lastShotSnd=0, lastTickSnd=0;
 const SFX = {
-  shot(){ if(!AC) return; const t=AC.currentTime;
-    if(t-lastShotSnd<.055) return; lastShotSnd=t;
+  shot(){ if(!AC)return; const t=AC.currentTime;
+    if(t-lastShotSnd<.055)return; lastShotSnd=t;
     noise(t,.06,.10,'highpass',900);
     tone('square',200,70,t,.07,.06);
   },
-  tickGood(){ if(!AC) return; const t=AC.currentTime;
-    if(t-lastTickSnd<.08) return; lastTickSnd=t;
+  tickGood(){ if(!AC)return; const t=AC.currentTime;
+    if(t-lastTickSnd<.08)return; lastTickSnd=t;
     tone('sine',1100,1500,t,.05,.05);
   },
-  tickBad(){ if(!AC) return; const t=AC.currentTime;
-    if(t-lastTickSnd<.1) return; lastTickSnd=t;
+  tickBad(){ if(!AC)return; const t=AC.currentTime;
+    if(t-lastTickSnd<.1)return; lastTickSnd=t;
     tone('square',200,140,t,.08,.06);
   },
-  zombieDie(){ if(!AC) return; const t=AC.currentTime;
+  zombieDie(){ if(!AC)return; const t=AC.currentTime;
     tone('sawtooth',rnd(150,190),55,t,.24,.10);
   },
-  bite(){ if(!AC) return; const t=AC.currentTime;
+  bite(){ if(!AC)return; const t=AC.currentTime;
     noise(t,.14,.22,'lowpass',300);
     tone('sine',90,45,t,.16,.20);
   },
-  gateGood(){ if(!AC) return; const t=AC.currentTime;
+  gateGood(){ if(!AC)return; const t=AC.currentTime;
     tone('sine',523,523,t,.1,.14); tone('sine',659,659,t+.08,.1,.14); tone('sine',784,784,t+.16,.16,.14);
   },
-  gateBad(){ if(!AC) return; const t=AC.currentTime;
+  gateBad(){ if(!AC)return; const t=AC.currentTime;
     tone('square',180,90,t,.3,.14); noise(t,.2,.1,'lowpass',500);
   },
-  crate(){ if(!AC) return; const t=AC.currentTime;
+  crate(){ if(!AC)return; const t=AC.currentTime;
     tone('triangle',660,660,t,.09,.16); tone('triangle',880,880,t+.07,.09,.16); tone('triangle',1320,1320,t+.14,.2,.16);
   },
-  boss(){ if(!AC) return; const t=AC.currentTime;
+  boss(){ if(!AC)return; const t=AC.currentTime;
     tone('sawtooth',70,45,t,.7,.16);
   },
-  over(){ if(!AC) return; const t=AC.currentTime;
+  over(){ if(!AC)return; const t=AC.currentTime;
     tone('sine',330,330,t,.25,.18); tone('sine',262,262,t+.25,.25,.18); tone('sine',196,180,t+.5,.6,.18);
   },
 };
 function startAmbient(){
-  // dunkler Wind: gefiltertes Rauschen + tiefer Brummton, dauerhaft leise
   const s=AC.createBufferSource(); s.buffer=noiseBuf; s.loop=true;
   const f=AC.createBiquadFilter(); f.type='lowpass'; f.frequency.value=240;
   const g=AC.createGain(); g.gain.value=.035;
@@ -229,17 +243,18 @@ const WEAPONS = [
 ];
 
 // ================================================================ State
+const SQUAD_CAP=99;
 let state='menu';
-let squad, weap, dist, speed, squadX, targetX, shake, fireT, flashT, best=0;
+let squad, weap, dist, speed, squadX, targetX, shake, fireT, flashT;
 let zombies, bullets, gates, crates, parts, floats, dying, decals, clouds;
 let nextGate, nextWave, nextCrate;
 
 function reset(){
-  squad=1; weap=0; dist=0; speed=14;
+  squad=1; weap=0; dist=0; speed=15;
   squadX=0; targetX=0; shake=0; fireT=0; flashT=0;
   zombies=[]; bullets=[]; gates=[]; crates=[]; parts=[]; floats=[]; dying=[]; decals=[];
   clouds=[]; for(let i=0;i<4;i++) clouds.push({x:rnd(0,1),y:rnd(.02,.16),w:rnd(.2,.4),v:rnd(.004,.012)});
-  nextGate=55; nextWave=80; nextCrate=190;
+  nextGate=50; nextWave=70; nextCrate=190;
   syncHud();
 }
 function syncHud(){
@@ -264,28 +279,28 @@ addEventListener('keydown',e=>{
 addEventListener('keyup',e=>keys[e.key]=false);
 
 // ================================================================ Spawner
-// Tor-Panels: gut (+ / ×) wird durch Beschuss BESSER, schlecht (− / ÷) wird SCHLIMMER.
+// Truppenwachstum bewusst gedrosselt: kleinere Pluswerte, ×2 selten,
+// Aufladen braucht mehr Treffer. Rote Tore werden durch Beschuss schlimmer.
 function makePanel(good, tier){
   if(good){
-    return Math.random()<.3
+    return Math.random()<.16
       ? { op:'*', v:2, hits:0, good:true }
-      : { op:'+', v:Math.round(rnd(2,5+tier*2)), hits:0, good:true };
+      : { op:'+', v:Math.round(rnd(2,4+tier*1.5)), hits:0, good:true };
   }
-  return Math.random()<.3
+  return Math.random()<.32
     ? { op:'/', v:2, hits:0, good:false }
-    : { op:'-', v:Math.round(rnd(5,10+tier*3)), hits:0, good:false };
+    : { op:'-', v:Math.round(rnd(6,12+tier*3)), hits:0, good:false };
 }
 function spawnGate(){
   const tier=dist/650;
   if(Math.random()<.45){
-    // Einzeltor: deckt nur einen Teil der Straße ab, man KANN ausweichen
     const w=rnd(4.2,5.4);
     const x0=rnd(-ROAD+.4, ROAD-.4-w);
-    const good=Math.random()<.5;
+    const good=Math.random()<.45;
     gates.push({ z:SPAWN_Z, done:false, panels:[{x0:x0, x1:x0+w, p:makePanel(good,tier)}] });
   }else{
     const a=makePanel(true,tier);
-    const b=makePanel(Math.random()<.3, tier);
+    const b=makePanel(Math.random()<.22, tier);
     const left=Math.random()<.5;
     gates.push({ z:SPAWN_Z, done:false, panels:[
       { x0:-ROAD, x1:0, p:left?a:b },
@@ -294,29 +309,29 @@ function spawnGate(){
   }
 }
 function spawnWave(){
-  const n=Math.min(26, 4+Math.floor(dist/125));
-  const hp=1+Math.floor(dist/340);
+  const n=Math.min(30, 5+Math.floor(dist/110));
+  const hp=1+Math.floor(dist/300);
   for(let i=0;i<n;i++){
     zombies.push({
       x:rnd(-ROAD+.8,ROAD-.8),
-      z:SPAWN_Z+Math.floor(i/5)*3.2+rnd(0,1.4),
-      hp:hp,max:hp,big:false,sp:rnd(5.5,8),ph:Math.random()*6.28
+      z:SPAWN_Z+Math.floor(i/5)*3.0+rnd(0,1.4),
+      hp:hp,max:hp,big:false,sp:rnd(6,9),ph:Math.random()*6.28,hit:0
     });
   }
-  if(dist>350 && Math.random()<.3){
-    const bh=16+Math.floor(dist/70);
-    zombies.push({x:rnd(-3,3),z:SPAWN_Z+8,hp:bh,max:bh,big:true,sp:3.6,ph:0});
+  if(dist>300 && Math.random()<.35){
+    const bh=18+Math.floor(dist/60);
+    zombies.push({x:rnd(-3,3),z:SPAWN_Z+8,hp:bh,max:bh,big:true,sp:3.8,ph:0,hit:0});
     SFX.boss();
   }
 }
 function spawnCrate(){
-  const hp=16+Math.floor(dist/100);
+  const hp=20+Math.floor(dist/90);
   crates.push({x:rnd(-3.5,3.5),z:SPAWN_Z,hp:hp,max:hp,hit:0});
 }
 
 // ================================================================ Update
 function update(dt){
-  speed=14+Math.min(11, dist/320);
+  speed=15+Math.min(13, dist/280);
   dist+=speed*dt;
 
   if(keys.ArrowLeft||keys.a) targetX=Math.max(-ROAD+1,targetX-10*dt);
@@ -324,7 +339,7 @@ function update(dt){
   squadX+=(targetX-squadX)*Math.min(1,12*dt);
 
   if(dist>nextGate){ spawnGate(); nextGate+=rnd(100,150); }
-  if(dist>nextWave){ spawnWave(); nextWave+=Math.max(40, rnd(75,100)-dist/45); }
+  if(dist>nextWave){ spawnWave(); nextWave+=Math.max(34, rnd(65,90)-dist/40); }
   if(dist>nextCrate && weap<WEAPONS.length-1){ spawnCrate(); nextCrate+=rnd(230,310); }
 
   // Feuern
@@ -378,7 +393,7 @@ function update(dt){
       const zb=zombies[j];
       const rad=zb.big?1.6:.85;
       if(Math.abs(b.z-zb.z)<rad&&Math.abs(b.x-zb.x)<rad*.8){
-        zb.hp-=b.dmg; gone=true;
+        zb.hp-=b.dmg; zb.hit=.08; gone=true;
         parts.push({x:b.x,z:zb.z,t:.28,r:.35,c:'#56E39F',kind:'blood'});
         if(zb.hp<=0){
           zombies.splice(j,1);
@@ -399,11 +414,11 @@ function update(dt){
   for(let i=zombies.length-1;i>=0;i--){
     const zb=zombies[i];
     zb.z-=(speed+zb.sp)*dt;
-    zb.x+=Math.sign(squadX-zb.x)*Math.min(Math.abs(squadX-zb.x),1.8*dt);
-    zb.ph+=dt*11;
+    zb.x+=Math.sign(squadX-zb.x)*Math.min(Math.abs(squadX-zb.x),2.0*dt);
+    zb.ph+=dt*11; zb.hit=Math.max(0,zb.hit-dt);
     if(zb.z<.7){
       if(Math.abs(zb.x-squadX)<2.6){
-        const bite=zb.big?5:1;
+        const bite=zb.big?6:1;
         squad=Math.max(0,squad-bite);
         shake=.35; SFX.bite(); syncHud();
         floats.push({x:zb.x,z:.6,t:.7,txt:'-'+bite,c:'#E8462B'});
@@ -422,7 +437,6 @@ function update(dt){
       g.done=true;
       const panel=g.panels.find(pa=>squadX>=pa.x0&&squadX<pa.x1);
       if(panel) applyOp(panel.p);
-      // Einzeltor verfehlt = nichts passiert (Ausweichen lohnt sich bei rot)
     }
     if(g.z<-4) gates.splice(i,1);
   }
@@ -448,10 +462,9 @@ function update(dt){
 function chargePanel(p){
   p.hits++;
   if(p.good){
-    if(p.op==='+' && p.hits%2===0){ p.v++; SFX.tickGood(); }
-    else if(p.op==='*' && p.hits%28===0){ p.v=Math.min(5,p.v+1); SFX.tickGood(); }
+    if(p.op==='+' && p.hits%3===0){ p.v++; SFX.tickGood(); }
+    else if(p.op==='*' && p.hits%40===0){ p.v=Math.min(3,p.v+1); SFX.tickGood(); }
   }else{
-    // Rote Tore werden durch Beschuss SCHLIMMER
     if(p.op==='-' && p.hits%3===0){ p.v++; SFX.tickBad(); }
     else if(p.op==='/' && p.hits%16===0){ p.v=Math.min(4,p.v+1); SFX.tickBad(); }
   }
@@ -461,9 +474,9 @@ function applyOp(p){
   const before=squad;
   if(p.op==='+') squad+=p.v;
   else if(p.op==='-') squad=Math.max(0,squad-p.v);
-  else if(p.op==='*') squad=Math.min(140,squad*p.v);
+  else if(p.op==='*') squad=Math.min(SQUAD_CAP,squad*p.v);
   else if(p.op==='/') squad=Math.floor(squad/p.v);
-  squad=Math.min(140,squad);
+  squad=Math.min(SQUAD_CAP,squad);
   const d=squad-before;
   floats.push({x:squadX,z:1.4,t:.9,txt:(d>=0?'+':'')+d,c:d>=0?'#56E39F':'#E8462B'});
   if(d>=0) SFX.gateGood(); else { SFX.gateBad(); shake=.25; }
@@ -483,7 +496,7 @@ function formation(){
 }
 
 // ================================================================ Zeichnen
-let sky=null;
+let sky=null, stars=null;
 function drawSky(){
   if(!sky){
     sky=ctx.createLinearGradient(0,0,0,HZ+40);
@@ -493,6 +506,17 @@ function drawSky(){
   }
   ctx.fillStyle=sky; ctx.fillRect(0,0,W,HZ+40);
   ctx.fillStyle='#05070A'; ctx.fillRect(0,HZ+38,W,H-HZ);
+
+  // Sterne (fix, einmal generiert)
+  if(!stars){
+    stars=[];
+    for(let i=0;i<46;i++) stars.push([Math.random()*W, Math.random()*HZ*.75, Math.random()]);
+  }
+  for(const st of stars){
+    const tw=.35+Math.sin(tAcc*2+st[2]*20)*.25;
+    ctx.fillStyle='rgba(220,232,255,'+(tw*st[2])+')';
+    ctx.fillRect(st[0],st[1],1.4,1.4);
+  }
 
   // Mond
   const mx=W*.78, my=HZ*.32, mr=W*.055;
@@ -512,7 +536,7 @@ function drawSky(){
     ctx.beginPath(); ctx.ellipse(cx+cw*.4,cy+cw*.06,cw*.6,cw*.16,0,0,6.284); ctx.fill();
   }
 
-  // Skyline mit vereinzelt erleuchteten Fenstern
+  // Skyline
   ctx.fillStyle='#0C121C';
   const bw=W/14;
   for(let i=0;i<15;i++){
@@ -525,7 +549,6 @@ function drawSky(){
       ctx.fillStyle='#0C121C';
     }
   }
-  // Nebelwand
   const fog=ctx.createLinearGradient(0,HZ-40,0,HZ+70);
   fog.addColorStop(0,'rgba(86,227,159,0)');
   fog.addColorStop(.55,'rgba(70,120,110,.32)');
@@ -546,7 +569,7 @@ function drawRoad(){
   g.addColorStop(0,'#0E141C'); g.addColorStop(1,'#1C2531');
   ctx.fillStyle=g; ctx.fill();
 
-  // Risse im Asphalt (deterministisch aus Distanz)
+  // Risse
   ctx.strokeStyle='rgba(0,0,0,.35)'; ctx.lineWidth=1;
   const co=dist%40;
   for(let i=0;i<6;i++){
@@ -585,6 +608,36 @@ function drawRoad(){
     ctx.closePath(); ctx.fill();
   }
 
+  // ---- Hängebrücken-Pylone mit Querträger und Schrägseilen ----
+  const TOWER_GAP=130;
+  const to=dist%TOWER_GAP;
+  for(let i=0;i<3;i++){
+    const z=i*TOWER_GAP-to+30;
+    if(z<nz||z>fz) continue;
+    const s=sc(z);
+    const yb=py(z,s,0), yt=py(z,s,15);
+    const xl=px(-ROAD,z,s), xr=px(ROAD,z,s);
+    const pw=Math.max(2,.55*PPU*s);
+    // Pylone
+    ctx.fillStyle='#22303F';
+    ctx.fillRect(xl-pw/2,yt,pw,yb-yt);
+    ctx.fillRect(xr-pw/2,yt,pw,yb-yt);
+    // Querträger oben
+    ctx.fillRect(xl-pw/2,yt,xr-xl+pw,Math.max(2,.5*PPU*s));
+    // rote Positionslichter
+    ctx.fillStyle='rgba(232,70,43,'+(.5+Math.sin(tAcc*3+i)*.3)+')';
+    ctx.beginPath(); ctx.arc(xl,yt,Math.max(1.5,.14*PPU*s),0,6.284); ctx.fill();
+    ctx.beginPath(); ctx.arc(xr,yt,Math.max(1.5,.14*PPU*s),0,6.284); ctx.fill();
+    // Schrägseile fächerartig nach vorn und hinten
+    ctx.strokeStyle='rgba(120,140,165,.35)'; ctx.lineWidth=1;
+    for(const dz of [-40,-25,-12,12,25,40]){
+      const z2=z+dz; if(z2<nz||z2>fz) continue;
+      const s2=sc(z2);
+      ctx.beginPath(); ctx.moveTo(xl,yt); ctx.lineTo(px(-ROAD,z2,s2),py(z2,s2,1.35)); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(xr,yt); ctx.lineTo(px(ROAD,z2,s2),py(z2,s2,1.35)); ctx.stroke();
+    }
+  }
+
   // Geländer + Lampen
   for(const side of [-1,1]){
     const X=ROAD*side;
@@ -608,13 +661,19 @@ function drawRoad(){
       halo.addColorStop(1,'rgba(245,197,66,0)');
       ctx.fillStyle=halo;
       ctx.beginPath(); ctx.arc(gx,gy,3.4*PPU*s,0,6.284); ctx.fill();
-      // Lichtkegel auf der Fahrbahn
       ctx.fillStyle='rgba(245,197,66,.05)';
       ctx.beginPath();
       ctx.ellipse(px(X-side*1.1,z,s),by,2.6*PPU*s,.7*PPU*s,0,0,6.284);
       ctx.fill();
     }
   }
+
+  // Tiefennebel: ferne Fahrbahn versinkt im Dunst
+  const dfog=ctx.createLinearGradient(0,py(fz,sf,0),0,py(30,sc(30),0));
+  dfog.addColorStop(0,'rgba(30,45,55,.55)');
+  dfog.addColorStop(1,'rgba(30,45,55,0)');
+  ctx.fillStyle=dfog;
+  ctx.fillRect(0,py(fz,sf,0)-2,W,py(30,sc(30),0)-py(fz,sf,0)+4);
 }
 
 function drawZombie(zb){
@@ -623,39 +682,34 @@ function drawZombie(zb){
   const x=px(zb.x,zb.z,s), y=py(zb.z,s,0);
   const sway=Math.sin(zb.ph)*.1*u;
   const lurch=Math.abs(Math.sin(zb.ph*.5))*.06*u;
+  const flash=zb.hit>0;
 
   ctx.fillStyle='rgba(0,0,0,.35)';
   ctx.beginPath(); ctx.ellipse(x,y,u*.42,u*.13,0,0,6.284); ctx.fill();
 
-  // Beine (alternierend)
   const step=Math.sin(zb.ph);
-  ctx.fillStyle=zb.big?'#5E8A3C':'#3E7050';
+  ctx.fillStyle=flash?'#DFF5E5':(zb.big?'#5E8A3C':'#3E7050');
   ctx.fillRect(x-u*.22+step*u*.08, y-u*.5, u*.16, u*.5);
   ctx.fillRect(x+u*.06-step*u*.08, y-u*.5, u*.16, u*.5);
 
-  // Rumpf, leicht vornübergebeugt
-  ctx.fillStyle=zb.big?'#7BAE4C':'#4E8C5E';
+  ctx.fillStyle=flash?'#EAFBF0':(zb.big?'#7BAE4C':'#4E8C5E');
   ctx.fillRect(x-u*.3+sway,y-u*1.35+lurch,u*.6,u*.9);
-  // zerfetzter Saum
-  ctx.fillStyle=zb.big?'#6B9E42':'#427C52';
+  ctx.fillStyle=flash?'#DFF5E5':(zb.big?'#6B9E42':'#427C52');
   ctx.fillRect(x-u*.3+sway,y-u*.5+lurch,u*.18,u*.08);
   ctx.fillRect(x+u*.05+sway,y-u*.48+lurch,u*.14,u*.06);
 
-  // ausgestreckte Arme, wippend
   const arm=Math.sin(zb.ph*1.3)*.06*u;
-  ctx.fillStyle=zb.big?'#7BAE4C':'#4E8C5E';
+  ctx.fillStyle=flash?'#EAFBF0':(zb.big?'#7BAE4C':'#4E8C5E');
   ctx.fillRect(x-u*.66+sway,y-u*1.28+lurch+arm,u*.38,u*.16);
   ctx.fillRect(x+u*.28+sway,y-u*1.28+lurch-arm,u*.38,u*.16);
-  // Hände
-  ctx.fillStyle=zb.big?'#A8CE74':'#6FAF7C';
+  ctx.fillStyle=flash?'#FFFFFF':(zb.big?'#A8CE74':'#6FAF7C');
   ctx.fillRect(x-u*.72+sway,y-u*1.3+lurch+arm,u*.12,u*.2);
   ctx.fillRect(x+u*.6+sway,y-u*1.3+lurch-arm,u*.12,u*.2);
 
-  // Kopf schief
   ctx.save();
   ctx.translate(x+sway,y-u*1.55+lurch);
   ctx.rotate(Math.sin(zb.ph*.7)*.15+.1);
-  ctx.fillStyle=zb.big?'#A8CE74':'#6FAF7C';
+  ctx.fillStyle=flash?'#FFFFFF':(zb.big?'#A8CE74':'#6FAF7C');
   ctx.beginPath(); ctx.arc(0,0,u*.26,0,6.284); ctx.fill();
   ctx.fillStyle='#E8462B';
   ctx.fillRect(-u*.16,-u*.07,u*.1,u*.07);
@@ -675,7 +729,7 @@ function drawDying(d){
   const s=sc(Math.max(d.z,0)); if(s<=.02) return;
   const u=PPU*s*(d.big?1.9:1);
   const x=px(d.x,d.z,s), y=py(d.z,s,0);
-  const k=1-d.t/d.max; // 0..1 Fallfortschritt
+  const k=1-d.t/d.max;
   ctx.save();
   ctx.globalAlpha=1-k*.6;
   ctx.translate(x,y);
@@ -698,25 +752,21 @@ function drawSoldier(x,z,t,first){
   ctx.fillStyle='rgba(0,0,0,.4)';
   ctx.beginPath(); ctx.ellipse(sx,sy,u*.34,u*.11,0,0,6.284); ctx.fill();
 
-  // Beine im Laufzyklus
   ctx.fillStyle='#233528';
   ctx.fillRect(sx-u*.18+step*u*.09, sy-u*.42, u*.14, u*.42);
   ctx.fillRect(sx+u*.04-step*u*.09, sy-u*.42, u*.14, u*.42);
 
-  // Rumpf mit Weste
   ctx.fillStyle='#2F4A3C';
   ctx.fillRect(sx-u*.24,sy-u*1.15+bob,u*.48,u*.75);
   ctx.fillStyle='#22382E';
   ctx.fillRect(sx-u*.18,sy-u*1.08+bob,u*.36,u*.3);
 
-  // Kopf + Helm
   ctx.fillStyle='#E7C9A0';
   ctx.beginPath(); ctx.arc(sx,sy-u*1.32+bob,u*.2,0,6.284); ctx.fill();
   ctx.fillStyle='#243A2E';
   ctx.beginPath(); ctx.arc(sx,sy-u*1.38+bob,u*.23,Math.PI,0); ctx.fill();
   ctx.fillRect(sx-u*.23,sy-u*1.38+bob,u*.46,u*.06);
 
-  // Waffe mit Rückstoß + Mündungsfeuer
   const recoil=flashT>0?-u*.06:0;
   ctx.fillStyle='#1A1F26';
   ctx.fillRect(sx+u*.08+recoil,sy-u*1.0+bob,u*.52,u*.12);
@@ -730,6 +780,12 @@ function drawSoldier(x,z,t,first){
     ctx.lineTo(fx+u*.42,fy);
     ctx.lineTo(fx+u*.3,fy+u*.12);
     ctx.closePath(); ctx.fill();
+    // Bodenlicht vom Mündungsfeuer
+    const gl=ctx.createRadialGradient(fx,sy,0,fx,sy,u*2.2);
+    gl.addColorStop(0,'rgba(255,220,120,.16)');
+    gl.addColorStop(1,'rgba(255,220,120,0)');
+    ctx.fillStyle=gl;
+    ctx.beginPath(); ctx.ellipse(fx,sy,u*2.2,u*.6,0,0,6.284); ctx.fill();
   }
 }
 
@@ -743,14 +799,12 @@ function drawGate(g){
     const pulse=.14+Math.sin(tAcc*4+(good?0:2))*.04;
     ctx.fillStyle='rgba('+base+','+pulse+')';
     ctx.fillRect(x0,yt,x1-x0,yb-yt);
-    // Ladebalken (bei rot: Warnbalken, wie stark es sich schon verschlimmert hat)
-    const need=pa.p.op==='+'?2:pa.p.op==='-'?3:pa.p.op==='*'?28:16;
+    const need=pa.p.op==='+'?3:pa.p.op==='-'?3:pa.p.op==='*'?40:16;
     const fill=(pa.p.hits%need)/need;
     ctx.fillStyle='rgba('+base+',.34)';
     ctx.fillRect(x0,yb-(yb-yt)*fill,x1-x0,(yb-yt)*fill);
     ctx.strokeStyle='rgba('+base+',.9)'; ctx.lineWidth=Math.max(1,2*s);
     ctx.strokeRect(x0,yt,x1-x0,yb-yt);
-    // Pfosten
     ctx.fillStyle='rgba('+base+',.8)';
     ctx.fillRect(x0-2*s,yt,Math.max(2,4*s),yb-yt);
     ctx.fillRect(x1-2*s,yt,Math.max(2,4*s),yb-yt);
@@ -803,7 +857,6 @@ function render(t){
   items.sort((a,b)=>b.z-a.z);
   for(const it of items) it.d();
 
-  // Geschosse mit Glow
   for(const b of bullets){
     const s=sc(b.z); if(s<=.02) continue;
     const bx=px(b.x,b.z,s), by=py(b.z,s,.95);
@@ -863,30 +916,22 @@ function gameOver(){
   state='over';
   SFX.over();
   const m=dist|0;
+  const isNew = m>best && best>0;
   best=Math.max(best,m);
   saveBest(best);
+  elBestH.textContent='Best '+best+' m';
   kickEl.textContent='Trupp ausgelöscht';
   titleEl.innerHTML='Überrannt<em>auf Meter '+m+'</em>';
   scoreEl.hidden=false; scoreEl.textContent=m+' m';
-  bestEl.hidden=false; bestEl.textContent='Bestwert '+best+' m';
+  bestEl.hidden=false;
+  bestEl.innerHTML = isNew
+    ? '<span class="newbest">Neuer Bestwert!</span> '+best+' m'
+    : 'Bestwert '+best+' m';
   rulesEl.innerHTML='Merk dir: <span class="bad">rote Tore werden durch Treffer schlimmer</span> – Einzeltore kann man komplett umfahren. Grüne Kisten immer mitnehmen.';
   btn.textContent='Nochmal';
   screenEl.classList.remove('hidden');
 }
 btn.addEventListener('click',start);
-
-async function loadBest(){
-  try{
-    if(window.storage&&window.storage.get){
-      const r=await window.storage.get('best-distance');
-      if(r&&r.value) best=parseInt(r.value,10)||0;
-    }
-  }catch(e){}
-}
-async function saveBest(v){
-  try{ if(window.storage&&window.storage.set) await window.storage.set('best-distance',String(v)); }
-  catch(e){}
-}
 
 resize(); reset(); loadBest();
 requestAnimationFrame(loop);
