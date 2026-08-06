@@ -214,6 +214,10 @@ const SFX = {
   boss(){ if(!AC)return; const t=AC.currentTime;
     tone('sawtooth',70,45,t,.7,.16);
   },
+  boom(){ if(!AC)return; const t=AC.currentTime;
+    noise(t,.32,.20,'lowpass',700);
+    tone('sine',140,40,t,.35,.16);
+  },
   over(){ if(!AC)return; const t=AC.currentTime;
     tone('sine',330,330,t,.25,.18); tone('sine',262,262,t+.25,.25,.18); tone('sine',196,180,t+.5,.6,.18);
   },
@@ -234,16 +238,21 @@ function startAmbient(){
 
 // ================================================================ Waffen
 const WEAPONS = [
-  { name:'Pistole',      rate:.28, dmg:1, pellets:1, spread:0,  color:'#F5C542' },
-  { name:'MP',           rate:.15, dmg:1, pellets:1, spread:0,  color:'#F5C542' },
-  { name:'Sturmgewehr',  rate:.10, dmg:2, pellets:1, spread:0,  color:'#FFE08A' },
-  { name:'Schrotflinte', rate:.24, dmg:2, pellets:3, spread:2.6,color:'#FFB03A' },
-  { name:'Minigun',      rate:.05, dmg:2, pellets:1, spread:.8, color:'#FFD166' },
-  { name:'Plasmawerfer', rate:.05, dmg:4, pellets:2, spread:1.2,color:'#7DF9FF' },
+  { name:'Pistole',       rate:.28, dmg:1,  pellets:1, spread:0,   color:'#F5C542' },
+  { name:'MP',            rate:.15, dmg:1,  pellets:1, spread:0,   color:'#F5C542' },
+  { name:'Sturmgewehr',   rate:.10, dmg:2,  pellets:1, spread:0,   color:'#FFE08A' },
+  { name:'Schrotflinte',  rate:.24, dmg:2,  pellets:3, spread:2.6, color:'#FFB03A' },
+  { name:'Doppelflinte',  rate:.20, dmg:2,  pellets:5, spread:3.4, color:'#FF9A2E' },
+  { name:'Flammenwerfer', rate:.03, dmg:1,  pellets:2, spread:3.2, color:'#FF6B2C', range:26, speed:34, glow:'255,120,50' },
+  { name:'Granatwerfer',  rate:.42, dmg:4,  pellets:1, spread:.4,  color:'#C7F04A', splash:3.2, speed:52 },
+  { name:'Minigun',       rate:.045,dmg:2,  pellets:1, spread:.9,  color:'#FFD166' },
+  { name:'Laserlanze',    rate:.13, dmg:3,  pellets:1, spread:0,   color:'#7DF9FF', pierce:true, speed:120, glow:'125,249,255' },
+  { name:'Plasmawerfer',  rate:.05, dmg:4,  pellets:2, spread:1.2, color:'#7DF9FF', glow:'125,249,255' },
+  { name:'Railgun',       rate:.34, dmg:14, pellets:1, spread:0,   color:'#D6B8FF', pierce:true, speed:160, glow:'214,184,255' },
 ];
 
 // ================================================================ State
-const SQUAD_CAP=99;
+const SQUAD_CAP=99, GATE_GAIN_CAP=20;
 let state='menu';
 let squad, weap, dist, speed, squadX, targetX, shake, fireT, flashT;
 let zombies, bullets, gates, crates, parts, floats, dying, decals, clouds;
@@ -254,7 +263,7 @@ function reset(){
   squadX=0; targetX=0; shake=0; fireT=0; flashT=0;
   zombies=[]; bullets=[]; gates=[]; crates=[]; parts=[]; floats=[]; dying=[]; decals=[];
   clouds=[]; for(let i=0;i<4;i++) clouds.push({x:rnd(0,1),y:rnd(.02,.16),w:rnd(.2,.4),v:rnd(.004,.012)});
-  nextGate=50; nextWave=70; nextCrate=190;
+  nextGate=50; nextWave=70; nextCrate=260;
   syncHud();
 }
 function syncHud(){
@@ -308,11 +317,13 @@ function spawnGate(){
     ]});
   }
 }
+let zid=0;
 function spawnWave(){
   const n=Math.min(30, 5+Math.floor(dist/110));
   const hp=1+Math.floor(dist/300);
   for(let i=0;i<n;i++){
     zombies.push({
+      id:++zid,
       x:rnd(-ROAD+.8,ROAD-.8),
       z:SPAWN_Z+Math.floor(i/5)*3.0+rnd(0,1.4),
       hp:hp,max:hp,big:false,sp:rnd(6,9),ph:Math.random()*6.28,hit:0
@@ -320,12 +331,13 @@ function spawnWave(){
   }
   if(dist>300 && Math.random()<.35){
     const bh=18+Math.floor(dist/60);
-    zombies.push({x:rnd(-3,3),z:SPAWN_Z+8,hp:bh,max:bh,big:true,sp:3.8,ph:0,hit:0});
+    zombies.push({id:++zid,x:rnd(-3,3),z:SPAWN_Z+8,hp:bh,max:bh,big:true,sp:3.8,ph:0,hit:0});
     SFX.boss();
   }
 }
 function spawnCrate(){
-  const hp=20+Math.floor(dist/90);
+  // Waffen kommen bewusst spät: viel HP, große Abstände
+  const hp=30+Math.floor(dist/70);
   crates.push({x:rnd(-3.5,3.5),z:SPAWN_Z,hp:hp,max:hp,hit:0});
 }
 
@@ -340,7 +352,7 @@ function update(dt){
 
   if(dist>nextGate){ spawnGate(); nextGate+=rnd(100,150); }
   if(dist>nextWave){ spawnWave(); nextWave+=Math.max(34, rnd(65,90)-dist/40); }
-  if(dist>nextCrate && weap<WEAPONS.length-1){ spawnCrate(); nextCrate+=rnd(230,310); }
+  if(dist>nextCrate && weap<WEAPONS.length-1){ spawnCrate(); nextCrate+=rnd(340,430); }
 
   // Feuern
   const w=WEAPONS[weap];
@@ -352,7 +364,12 @@ function update(dt){
     const shooters=Math.min(pos.length,8);
     for(let i=0;i<shooters;i++){
       for(let p=0;p<w.pellets;p++){
-        bullets.push({x:pos[i][0], z:.5+pos[i][1], dmg:w.dmg, col:w.color, vx:w.spread?rnd(-w.spread,w.spread):0});
+        bullets.push({
+          x:pos[i][0], z:.5+pos[i][1], dmg:w.dmg, col:w.color,
+          vx:w.spread?rnd(-w.spread,w.spread):0,
+          sp:w.speed||72, pierce:!!w.pierce, splash:w.splash||0,
+          range:w.range||0, glow:w.glow||'255,220,120', hitIds:null
+        });
       }
     }
   }
@@ -360,8 +377,8 @@ function update(dt){
   // Geschosse
   for(let i=bullets.length-1;i>=0;i--){
     const b=bullets[i];
-    b.z+=72*dt; b.x+=b.vx*dt;
-    let gone=b.z>SPAWN_Z+12||Math.abs(b.x)>ROAD+1;
+    b.z+=b.sp*dt; b.x+=b.vx*dt;
+    let gone=b.z>SPAWN_Z+12||Math.abs(b.x)>ROAD+1||(b.range&&b.z>b.range);
 
     if(!gone) for(const g of gates){
       if(g.done||Math.abs(b.z-g.z)>1.6) continue;
@@ -393,15 +410,22 @@ function update(dt){
       const zb=zombies[j];
       const rad=zb.big?1.6:.85;
       if(Math.abs(b.z-zb.z)<rad&&Math.abs(b.x-zb.x)<rad*.8){
-        zb.hp-=b.dmg; zb.hit=.08; gone=true;
-        parts.push({x:b.x,z:zb.z,t:.28,r:.35,c:'#56E39F',kind:'blood'});
-        if(zb.hp<=0){
-          zombies.splice(j,1);
-          SFX.zombieDie();
-          dying.push({x:zb.x,z:zb.z,t:.45,max:.45,big:zb.big,dir:Math.random()<.5?-1:1,ph:zb.ph});
-          decals.push({x:zb.x,z:zb.z,r:zb.big?1.4:.8,a:.5});
-          if(decals.length>40) decals.shift();
-          for(let k=0;k<7;k++) parts.push({x:zb.x+rnd(-.6,.6),z:zb.z,t:rnd(.3,.6),r:rnd(.2,.5),c:'#3FA97A',kind:'blood'});
+        if(b.pierce){
+          if(!b.hitIds) b.hitIds=[];
+          if(b.hitIds.indexOf(zb.id)>=0) continue;   // pro Zombie nur einmal
+          b.hitIds.push(zb.id);
+        }else gone=true;
+
+        hurtZombie(j,b.dmg,b.x);
+
+        if(b.splash){
+          SFX.boom();
+          for(let m=0;m<18;m++) parts.push({x:b.x+rnd(-1.4,1.4),z:b.z+rnd(-1.4,1.4),t:rnd(.2,.5),r:rnd(.3,.9),c:m%3?'#FFB03A':'#FFE9A8',kind:'flash'});
+          shake=Math.max(shake,.12);
+          for(let m=zombies.length-1;m>=0;m--){
+            const o=zombies[m];
+            if(Math.hypot(o.x-b.x,o.z-b.z)<b.splash) hurtZombie(m,b.dmg,o.x);
+          }
         }
         break;
       }
@@ -459,6 +483,22 @@ function update(dt){
   syncHud();
 }
 
+// Blut ist rot: Treffer- und Todespartikel sowie Lachen in Blutrot
+function hurtZombie(idx,dmg,hx){
+  const zb=zombies[idx];
+  if(!zb) return;
+  zb.hp-=dmg; zb.hit=.08;
+  parts.push({x:hx,z:zb.z,t:.28,r:.35,c:'#C4271A',kind:'blood'});
+  if(zb.hp<=0){
+    zombies.splice(idx,1);
+    SFX.zombieDie();
+    dying.push({x:zb.x,z:zb.z,t:.45,max:.45,big:zb.big,dir:Math.random()<.5?-1:1,ph:zb.ph});
+    decals.push({x:zb.x,z:zb.z,r:zb.big?1.4:.8,a:.55});
+    if(decals.length>40) decals.shift();
+    for(let k=0;k<8;k++) parts.push({x:zb.x+rnd(-.6,.6),z:zb.z,t:rnd(.3,.6),r:rnd(.2,.5),c:k%2?'#8E1A12':'#C4271A',kind:'blood'});
+  }
+}
+
 function chargePanel(p){
   p.hits++;
   if(p.good){
@@ -474,8 +514,10 @@ function applyOp(p){
   const before=squad;
   if(p.op==='+') squad+=p.v;
   else if(p.op==='-') squad=Math.max(0,squad-p.v);
-  else if(p.op==='*') squad=Math.min(SQUAD_CAP,squad*p.v);
+  else if(p.op==='*') squad=squad*p.v;
   else if(p.op==='/') squad=Math.floor(squad/p.v);
+  // Ein einzelnes Tor bringt höchstens +20 Soldaten
+  if(squad>before) squad=Math.min(squad, before+GATE_GAIN_CAP);
   squad=Math.min(SQUAD_CAP,squad);
   const d=squad-before;
   floats.push({x:squadX,z:1.4,t:.9,txt:(d>=0?'+':'')+d,c:d>=0?'#56E39F':'#E8462B'});
@@ -587,7 +629,7 @@ function drawRoad(){
   for(const d of decals){
     if(d.z<nz) continue;
     const s=sc(d.z);
-    ctx.fillStyle='rgba(70,140,100,'+Math.max(0,d.a)+')';
+    ctx.fillStyle='rgba(122,22,16,'+Math.max(0,d.a)+')';
     ctx.beginPath();
     ctx.ellipse(px(d.x,d.z,s),py(d.z,s,0),d.r*PPU*s,d.r*.3*PPU*s,0,0,6.284);
     ctx.fill();
@@ -860,11 +902,18 @@ function render(t){
   for(const b of bullets){
     const s=sc(b.z); if(s<=.02) continue;
     const bx=px(b.x,b.z,s), by=py(b.z,s,.95);
-    ctx.fillStyle='rgba(255,220,120,.18)';
-    ctx.beginPath(); ctx.arc(bx,by,Math.max(2,.3*PPU*s),0,6.284); ctx.fill();
+    ctx.fillStyle='rgba('+b.glow+',.2)';
+    ctx.beginPath(); ctx.arc(bx,by,Math.max(2,(b.splash?.55:.3)*PPU*s),0,6.284); ctx.fill();
     ctx.fillStyle=b.col;
-    const w=Math.max(1.2,.12*PPU*s), h=Math.max(3,.7*PPU*s);
-    ctx.fillRect(bx-w/2,by-h/2,w,h);
+    if(b.splash){                       // Granate: rundes Geschoss
+      ctx.beginPath(); ctx.arc(bx,by,Math.max(2,.26*PPU*s),0,6.284); ctx.fill();
+    }else if(b.pierce){                 // Laser/Railgun: langer Strahl
+      const w=Math.max(1.6,.16*PPU*s), h=Math.max(8,2.2*PPU*s);
+      ctx.fillRect(bx-w/2,by-h/2,w,h);
+    }else{
+      const w=Math.max(1.2,.12*PPU*s), h=Math.max(3,.7*PPU*s);
+      ctx.fillRect(bx-w/2,by-h/2,w,h);
+    }
   }
 
   const pos=formation();
