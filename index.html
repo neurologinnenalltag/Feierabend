@@ -112,12 +112,11 @@
     <div class="listTitle" id="listTitle" hidden>Top 10</div>
     <ol id="scoreList" hidden></ol>
     <p class="rules" id="rules">
-      Finger oder Maus steuert den Trupp, geschossen wird von allein.
-      <b>Kein Zombie darf durchkommen</b> – erreicht einer den unteren Rand, ist Schluss.
-      Kommt die Horde näher, bremst der Trupp automatisch ab; ist die Bahn frei, geht es schneller voran.<br><br>
-      <b>Grüne Tore</b> werden durch Beschuss besser –
-      <span class="bad">rote Tore werden durch Beschuss schlimmer.</span>
-      <span class="bad">Fallen schaden deinem Trupp genauso wie den Zombies.</span>
+      Finger oder Maus steuert den Trupp, geschossen wird von allein.<br><br>
+      <b>Grüne Tore musst du freischießen</b> – erst wenn die Panzerung durch ist,
+      rückt die Verstärkung ein. <span class="bad">Rote Tore werden durch Beschuss schlimmer.</span><br><br>
+      Zombies beißen sich am Trupp fest und fressen ihn auf. Solange sie dranhängen,
+      steht ihr still. <span class="bad">Stacheln töten jeden Soldaten, der darüberläuft.</span>
     </p>
     <button class="cta" id="btn">Losrennen</button>
   </div>
@@ -362,7 +361,6 @@ const WEAPONS = [
 // ================================================================ State
 const SQUAD_CAP=99, GATE_GAIN_CAP=20;
 const MAX_STRAFE=6.2;      // maximale Seitwärtsgeschwindigkeit in Metern/Sekunde
-const OVERRUN_Z=-1.3;      // ab hier hat ein Zombie den unteren Bildschirmrand erreicht
 // Boss-Typen: jeder hat ein eigenes Angriffsmuster
 const BOSSES=[
   { kind:'brute',   name:'DER KOLOSS',      col:'#8C3B2E', head:'#B85A45', hpF:34, hpD:38 },
@@ -372,17 +370,17 @@ const BOSSES=[
 ];
 let state='menu';
 let squad, weap, dist, speed, squadX, targetX, shake, fireT, flashT, pressure, overrunT;
-let zombies, bullets, gates, crates, parts, floats, dying, decals, clouds, fallen;
+let zombies, bullets, gates, crates, parts, floats, dying, decals, clouds, fallen, casings;
 let traps, boss, bossShots, bossIdx, nextBoss, warnT;
 let nextGate, nextWave, nextCrate, nextTrap;
 
 function reset(){
-  squad=3; weap=0; dist=0; speed=15; pressure=1; overrunT=0;
+  squad=1; weap=0; dist=0; speed=15; pressure=1; overrunT=0;
   squadX=0; targetX=0; shake=0; fireT=0; flashT=0;
-  zombies=[]; bullets=[]; gates=[]; crates=[]; parts=[]; floats=[]; dying=[]; decals=[]; fallen=[];
+  zombies=[]; bullets=[]; gates=[]; crates=[]; parts=[]; floats=[]; dying=[]; decals=[]; fallen=[]; casings=[];
   traps=[]; boss=null; bossShots=[]; bossIdx=0; nextBoss=650; warnT=0;
   clouds=[]; for(let i=0;i<4;i++) clouds.push({x:rnd(0,1),y:rnd(.02,.16),w:rnd(.2,.4),v:rnd(.004,.012)});
-  nextGate=5; nextWave=115; nextCrate=300; nextTrap=250;
+  nextGate=5; nextWave=135; nextCrate=300; nextTrap=250;
   syncHud();
 }
 function syncHud(){
@@ -408,13 +406,14 @@ addEventListener('keydown',e=>{
 addEventListener('keyup',e=>keys[e.key]=false);
 
 // ================================================================ Spawner
-// Truppenwachstum bewusst gedrosselt: kleinere Pluswerte, ×2 selten,
-// Aufladen braucht mehr Treffer. Rote Tore werden durch Beschuss schlimmer.
+// Gute Tore müssen freigeschossen werden: erst wenn die Panzerung durch ist,
+// löst sich das Tor auf und die Verstärkung rückt sofort ein.
+// Rote Tore bleiben stehen und werden durch Beschuss nur schlimmer.
 function makePanel(good, tier){
   if(good){
-    return Math.random()<.16
-      ? { op:'*', v:2, hits:0, good:true }
-      : { op:'+', v:Math.round(rnd(2,4+tier*1.5)), hits:0, good:true };
+    if(Math.random()<.16) return { op:'*', v:2, hits:0, need:30, good:true };
+    const v=Math.round(rnd(3,6+tier*2));
+    return { op:'+', v:v, hits:0, need:5+v*2, good:true };
   }
   return Math.random()<.32
     ? { op:'/', v:2, hits:0, good:false }
@@ -446,12 +445,12 @@ function spawnWave(){
       id:++zid,
       x:rnd(-ROAD+.8,ROAD-.8),
       z:SPAWN_Z+Math.floor(i/5)*3.0+rnd(0,1.4),
-      hp:hp,max:hp,big:false,sp:rnd(2.6,4.4),ph:Math.random()*6.28,hit:0,atkCd:.35
+      hp:hp,max:hp,big:false,sp:rnd(2.6,4.4),ph:Math.random()*6.28,hit:0,feed:0
     });
   }
   if(dist>300 && Math.random()<.35){
     const bh=18+Math.floor(dist/60);
-    zombies.push({id:++zid,x:rnd(-3,3),z:SPAWN_Z+8,hp:bh,max:bh,big:true,sp:2.0,ph:0,hit:0,atkCd:.5});
+    zombies.push({id:++zid,x:rnd(-3,3),z:SPAWN_Z+8,hp:bh,max:bh,big:true,sp:2.0,ph:0,hit:0,feed:0});
     SFX.boss();
   }
 }
@@ -496,10 +495,10 @@ function update(dt){
   let nearest=999;
   for(const zb of zombies) if(zb.z<nearest) nearest=zb.z;
   if(boss && boss.z<nearest) nearest=boss.z;
-  // freie Bahn = volles Tempo, dichte Horde = starkes Abbremsen
-  const want = nearest>36 ? 1 : Math.max(.16, (nearest-1.5)/34);
+  // freie Bahn = volles Tempo, Horde am Trupp = Stillstand
+  const want = nearest>36 ? 1 : Math.max(0, (nearest-1.1)/34);
   pressure += (want-pressure)*Math.min(1, 2.6*dt);
-  pressure = Math.max(.14, Math.min(1, pressure));
+  pressure = Math.max(0, Math.min(1, pressure));
 
   const base = 15+Math.min(13, dist/280);
   speed = base*pressure;
@@ -530,6 +529,13 @@ function update(dt){
     SFX.shot();
     const pos=formation();
     const shooters=Math.min(pos.length,8);
+    // Hülsen und Rauch am vordersten Schützen
+    if(pos.length){
+      casings.push({x:pos[0][0]+.3, y:1.0, z:pos[0][1], vx:rnd(.6,1.6), vy:rnd(1.4,2.4), t:.9, rot:rnd(0,6)});
+      if(casings.length>40) casings.shift();
+      if(Math.random()<.5)
+        parts.push({x:pos[0][0]+.7,z:pos[0][1]+.5,t:.35,r:rnd(.2,.4),c:'rgba(200,200,200,.5)',kind:'smoke'});
+    }
     for(let i=0;i<shooters;i++){
       for(let p=0;p<w.pellets;p++){
         bullets.push({
@@ -550,10 +556,9 @@ function update(dt){
 
     if(!gone) for(const g of gates){
       if(g.done||Math.abs(b.z-g.z)>1.6) continue;
-      const panel=g.panels.find(pa=>b.x>=pa.x0&&b.x<pa.x1);
-      if(panel){
-        chargePanel(panel.p);
-        parts.push({x:b.x,z:g.z,t:.2,r:.5,c:panel.p.good?'#B9FFDD':'#FF8A73',kind:'spark'});
+      const pi=g.panels.findIndex(pa=>b.x>=pa.x0&&b.x<pa.x1);
+      if(pi>=0){
+        hitPanel(g,pi,b.x);
         gone=true;
       }
       break;
@@ -605,23 +610,36 @@ function update(dt){
   // Zombies
   for(let i=zombies.length-1;i>=0;i--){
     const zb=zombies[i];
-    const melee = zb.z<1.0;
-    // im Nahkampf werden sie langsamer, laufen aber weiter durch die Linie
-    zb.z-=(speed+zb.sp*(melee?.45:1))*dt;
-    zb.x+=Math.sign(squadX-zb.x)*Math.min(Math.abs(squadX-zb.x),3.4*dt);
-    zb.ph+=dt*11; zb.hit=Math.max(0,zb.hit-dt);
+    zb.hit=Math.max(0,zb.hit-dt);
 
-    if(melee && Math.abs(zb.x-squadX)<2.8){
-      zb.atkCd-=dt;
-      if(zb.atkCd<=0){
-        zb.atkCd=.55;
+    if(zb.feed>0){
+      // Festgebissen: der Zombie bleibt an der Linie und frisst sich durch den Trupp
+      zb.z += (1.2-zb.z)*Math.min(1,4*dt);
+      zb.x += (squadX-zb.x)*Math.min(1,2.2*dt);
+      zb.ph += dt*7;
+      zb.feed -= dt;
+      if(zb.feed<=0){
+        zb.feed = zb.big?1.5:1.15;
         SFX.bite();
-        hurtSquad(zb.big?4:1, zb.x);
+        hurtSquad(zb.big?3:1, zb.x);
+        for(let k=0;k<6;k++) parts.push({x:zb.x+rnd(-.4,.4),z:zb.z,t:.45,r:rnd(.2,.5),c:'#C4271A',kind:'blood'});
         if(state!=='play') return;
       }
+      continue;
     }
-    // Unterer Bildschirmrand erreicht: die Linie ist durchbrochen
-    if(zb.z<OVERRUN_Z){ overrun(); return; }
+
+    zb.z-=(speed+zb.sp)*dt;
+    zb.x+=Math.sign(squadX-zb.x)*Math.min(Math.abs(squadX-zb.x),3.4*dt);
+    zb.ph+=dt*11;
+
+    // erreicht er den Trupp, beißt er sich fest
+    if(zb.z<1.6 && Math.abs(zb.x-squadX)<3.0 && squad>0){
+      zb.feed=.45;
+      decals.push({x:zb.x,z:1.2,r:.9,a:.45});
+      if(decals.length>40) decals.shift();
+      continue;
+    }
+    if(zb.z<-3) zombies.splice(i,1);   // seitlich vorbei: läuft weiter
   }
 
   // Tore
@@ -631,7 +649,8 @@ function update(dt){
     if(!g.done&&g.z<=.4){
       g.done=true;
       const panel=g.panels.find(pa=>squadX>=pa.x0&&squadX<pa.x1);
-      if(panel) applyOp(panel.p);
+      // Gute Tore muss man freischießen - durchlaufen bringt nichts mehr
+      if(panel && !panel.p.good) applyOp(panel.p);
     }
     if(g.z<-4) gates.splice(i,1);
   }
@@ -649,6 +668,12 @@ function update(dt){
   for(let i=floats.length-1;i>=0;i--){ const f=floats[i]; f.t-=dt; f.z-=speed*dt; if(f.t<=0)floats.splice(i,1); }
   for(let i=dying.length-1;i>=0;i--){ const d=dying[i]; d.t-=dt; d.z-=speed*dt; if(d.t<=0)dying.splice(i,1); }
   for(let i=fallen.length-1;i>=0;i--){ const f=fallen[i]; f.t-=dt; f.z-=speed*dt; if(f.t<=0)fallen.splice(i,1); }
+  for(let i=casings.length-1;i>=0;i--){
+    const c=casings[i];
+    c.t-=dt; c.vy-=9*dt; c.y+=c.vy*dt; c.x+=c.vx*dt; c.rot+=dt*9; c.z-=speed*dt;
+    if(c.y<0){ c.y=0; c.vy*=-.35; c.vx*=.6; }
+    if(c.t<=0) casings.splice(i,1);
+  }
   for(const d of decals){ d.z-=speed*dt; d.a-=dt*.05; }
   while(decals.length&&(decals[0].a<=0||decals[0].z<-4)) decals.shift();
   for(const cl of clouds){ cl.x+=cl.v*dt; if(cl.x>1.3)cl.x=-.3; }
@@ -658,6 +683,23 @@ function update(dt){
 }
 
 // ---------------------------------------------------------------- Fallen-Update
+// Tötet gezielt die Soldaten an den übergebenen Positionen (z.B. Stachelband)
+function killSoldiersAt(list){
+  const n=Math.min(list.length,squad);
+  if(n<=0) return;
+  for(let i=0;i<n;i++){
+    const p=list[i];
+    fallen.push({x:p[0],z:p[1],t:.8,max:.8,dir:Math.random()<.5?-1:1});
+    for(let k=0;k<3;k++) parts.push({x:p[0]+rnd(-.3,.3),z:p[1],t:.45,r:rnd(.15,.4),c:'#C4271A',kind:'blood'});
+  }
+  if(fallen.length>80) fallen.splice(0,fallen.length-80);
+  squad=Math.max(0,squad-n);
+  shake=Math.max(shake,.35);
+  floats.push({x:squadX,z:1.0,t:.8,txt:'-'+n,c:'#E8462B'});
+  syncHud();
+  if(squad<=0) gameOver();
+}
+
 function hurtSquad(n,x,txt){
   const real=Math.min(n,squad);
   if(real<=0) return;
@@ -713,8 +755,16 @@ function updateTraps(dt){
         const zb=zombies[j];
         if(Math.abs(zb.z-tr.z)<.9 && zb.x>tr.x0 && zb.x<tr.x1) hurtZombie(j,10*dt,zb.x);
       }
-      if(nearSquad && squadX>tr.x0 && squadX<tr.x1 && tr.pcd<=0){
-        tr.pcd=.45; hurtSquad(1,squadX); SFX.spike();
+      // Das Stachelband tötet genau den Teil des Trupps, der darüberläuft
+      if(!tr.done && tr.z<1.1){
+        tr.done=true;
+        const pos=formation();
+        const caught=pos.filter(p=>p[0]>tr.x0 && p[0]<tr.x1);
+        if(caught.length){
+          SFX.spike();
+          killSoldiersAt(caught);
+          if(state!=='play') return;
+        }
       }
       if(boss && Math.abs(boss.z-tr.z)<1.4 && boss.x>tr.x0-1 && boss.x<tr.x1+1) hurtBoss(9*dt);
 
@@ -806,7 +856,7 @@ function updateBoss(dt){
     if(b.st>3.0){
       b.st=0; SFX.bossRoar();
       for(let k=0;k<3;k++)
-        zombies.push({id:++zid,x:b.x+rnd(-2,2),z:b.z-1.5,hp:2,max:2,big:false,sp:rnd(4,5.5),ph:Math.random()*6.28,hit:0,atkCd:.35});
+        zombies.push({id:++zid,x:b.x+rnd(-2,2),z:b.z-1.5,hp:2,max:2,big:false,sp:rnd(4,5.5),ph:Math.random()*6.28,hit:0,feed:0});
     }
   }
 
@@ -856,15 +906,36 @@ function hurtZombie(idx,dmg,hx){
   }
 }
 
-function chargePanel(p){
+function hitPanel(g,pi,hx){
+  const pa=g.panels[pi], p=pa.p;
   p.hits++;
   if(p.good){
-    if(p.op==='+' && p.hits%3===0){ p.v++; SFX.tickGood(); }
-    else if(p.op==='*' && p.hits%40===0){ p.v=Math.min(3,p.v+1); SFX.tickGood(); }
+    parts.push({x:hx,z:g.z,t:.2,r:.45,c:'#B9FFDD',kind:'spark'});
+    if(p.hits>=p.need){
+      // Tor aufgebrochen: Verstärkung rückt sofort ein, das Tor verschwindet
+      openGate(p,(pa.x0+pa.x1)/2,g.z);
+      g.panels.splice(pi,1);
+      if(!g.panels.length) g.done=true;
+    }
   }else{
+    parts.push({x:hx,z:g.z,t:.2,r:.45,c:'#FF8A73',kind:'spark'});
     if(p.op==='-' && p.hits%3===0){ p.v++; SFX.tickBad(); }
     else if(p.op==='/' && p.hits%16===0){ p.v=Math.min(4,p.v+1); SFX.tickBad(); }
   }
+}
+
+function openGate(p,gx,gz){
+  const before=squad;
+  let next = p.op==='*' ? squad*p.v : squad+p.v;
+  next=Math.min(next, before+GATE_GAIN_CAP);
+  next=Math.min(SQUAD_CAP,next);
+  squad=next;
+  const d=squad-before;
+  SFX.gateGood();
+  floats.push({x:gx,z:Math.max(gz,1),t:1.1,txt:'+'+d,c:'#56E39F'});
+  for(let k=0;k<26;k++)
+    parts.push({x:gx+rnd(-2,2),z:gz+rnd(-.8,.8),t:rnd(.25,.7),r:rnd(.2,.7),c:k%2?'#B9FFDD':'#56E39F',kind:'shard'});
+  syncHud();
 }
 
 function applyOp(p){
@@ -960,17 +1031,23 @@ function drawSky(){
     ctx.beginPath(); ctx.ellipse(cx+cw*.4,cy+cw*.06,cw*.6,cw*.16,0,0,6.284); ctx.fill();
   }
 
-  // Skyline
-  ctx.fillStyle='#0C121C';
+  // Skyline in zwei Ebenen mit unterschiedlicher Parallaxe
   const bw=W/14;
-  for(let i=0;i<15;i++){
-    const h=18+((i*37)%5)*11+((i*13)%3)*7;
-    ctx.fillRect(i*bw-4,HZ-h,bw-3,h);
-    if((i*7)%3===0){
-      ctx.fillStyle='rgba(245,197,66,.35)';
-      ctx.fillRect(i*bw+bw*.3, HZ-h+6, 3, 3);
-      ctx.fillRect(i*bw+bw*.55, HZ-h+14, 3, 3);
-      ctx.fillStyle='#0C121C';
+  const layers=[
+    {off:(dist*0.05)%(bw*2), col:'#0A0F18', h0:14, sf:0.7, lit:'rgba(245,197,66,.16)'},
+    {off:(dist*0.13)%(bw*2), col:'#0D141F', h0:20, sf:1.0, lit:'rgba(245,197,66,.36)'}
+  ];
+  for(const L of layers){
+    for(let i=-1;i<17;i++){
+      const bx=i*bw-L.off;
+      const h=(L.h0+((i*37)%5)*11+((i*13)%3)*7)*L.sf;
+      ctx.fillStyle=L.col;
+      ctx.fillRect(bx,HZ-h,bw-3,h);
+      if((i*7)%3===0){
+        ctx.fillStyle=L.lit;
+        ctx.fillRect(bx+bw*.28,HZ-h+6,3,3);
+        ctx.fillRect(bx+bw*.55,HZ-h+15,3,3);
+      }
     }
   }
   const fog=ctx.createLinearGradient(0,HZ-40,0,HZ+70);
@@ -1089,6 +1166,18 @@ function drawRoad(){
       ctx.beginPath();
       ctx.ellipse(px(X-side*1.1,z,s),by,2.6*PPU*s,.7*PPU*s,0,0,6.284);
       ctx.fill();
+      // nasser Asphalt: langgezogene Spiegelung zum Betrachter hin
+      const rz=Math.max(-3,z-9), rs=sc(rz);
+      const refl=ctx.createLinearGradient(0,by,0,py(rz,rs,0));
+      refl.addColorStop(0,'rgba(245,197,66,.16)');
+      refl.addColorStop(1,'rgba(245,197,66,0)');
+      ctx.fillStyle=refl;
+      ctx.beginPath();
+      ctx.moveTo(px(X-side*1.5,z,s),by);
+      ctx.lineTo(px(X-side*0.7,z,s),by);
+      ctx.lineTo(px(X-side*1.6,rz,rs),py(rz,rs,0));
+      ctx.lineTo(px(X-side*2.6,rz,rs),py(rz,rs,0));
+      ctx.closePath(); ctx.fill();
     }
   }
 
@@ -1104,13 +1193,41 @@ function drawZombie(zb){
   const s=sc(zb.z); if(s<=.02) return;
   const u=PPU*s*(zb.big?1.9:1);
   const x=px(zb.x,zb.z,s), y=py(zb.z,s,0);
-  const sway=Math.sin(zb.ph)*.1*u;
-  const lurch=Math.abs(Math.sin(zb.ph*.5))*.06*u;
   const flash=zb.hit>0;
 
   ctx.fillStyle='rgba(0,0,0,.35)';
   ctx.beginPath(); ctx.ellipse(x,y,u*.42,u*.13,0,0,6.284); ctx.fill();
 
+  // ---- Fressender Zombie: gebeugt über sein Opfer, zuckende Schultern ----
+  if(zb.feed>0){
+    const gnaw=Math.sin(zb.ph*3)*.09*u;
+    ctx.save();
+    ctx.translate(x,y);
+    ctx.rotate(.55);
+    ctx.fillStyle=flash?'#EAFBF0':(zb.big?'#7BAE4C':'#4E8C5E');
+    ctx.fillRect(-u*.3,-u*1.15,u*.6,u*.85);
+    ctx.fillRect(-u*.62,-u*1.0+gnaw,u*.36,u*.18);
+    ctx.fillRect(u*.26,-u*1.0-gnaw,u*.36,u*.18);
+    ctx.fillStyle=flash?'#FFFFFF':(zb.big?'#A8CE74':'#6FAF7C');
+    ctx.beginPath(); ctx.arc(0,-u*1.35+gnaw*.5,u*.27,0,6.284); ctx.fill();
+    ctx.fillStyle='#8E1A12';
+    ctx.fillRect(-u*.12,-u*1.2,u*.24,u*.08);
+    ctx.restore();
+    // Blutspritzer beim Fressen
+    if(Math.random()<.25)
+      parts.push({x:zb.x+rnd(-.4,.4),z:zb.z,t:.3,r:rnd(.1,.3),c:'#C4271A',kind:'blood'});
+    ctx.fillStyle='rgba(122,22,16,.5)';
+    ctx.beginPath(); ctx.ellipse(x,y,u*.5,u*.16,0,0,6.284); ctx.fill();
+    if(zb.max>3){
+      const w=u*.66, p=Math.max(0,zb.hp/zb.max);
+      ctx.fillStyle='rgba(0,0,0,.6)'; ctx.fillRect(x-w/2,y-u*1.7,w,u*.11);
+      ctx.fillStyle='#E8462B'; ctx.fillRect(x-w/2,y-u*1.7,w*p,u*.11);
+    }
+    return;
+  }
+
+  const sway=Math.sin(zb.ph)*.1*u;
+  const lurch=Math.abs(Math.sin(zb.ph*.5))*.06*u;
   const step=Math.sin(zb.ph);
   ctx.fillStyle=flash?'#DFF5E5':(zb.big?'#5E8A3C':'#3E7050');
   ctx.fillRect(x-u*.22+step*u*.08, y-u*.5, u*.16, u*.5);
@@ -1176,20 +1293,34 @@ function drawSoldier(x,z,t,first){
   ctx.fillStyle='rgba(0,0,0,.4)';
   ctx.beginPath(); ctx.ellipse(sx,sy,u*.34,u*.11,0,0,6.284); ctx.fill();
 
+  // Stiefel und Beine im Laufzyklus
   ctx.fillStyle='#233528';
   ctx.fillRect(sx-u*.18+step*u*.09, sy-u*.42, u*.14, u*.42);
   ctx.fillRect(sx+u*.04-step*u*.09, sy-u*.42, u*.14, u*.42);
+  ctx.fillStyle='#141C17';
+  ctx.fillRect(sx-u*.2+step*u*.09, sy-u*.08, u*.18, u*.08);
+  ctx.fillRect(sx+u*.02-step*u*.09, sy-u*.08, u*.18, u*.08);
 
+  // Rucksack hinter dem Rumpf
+  ctx.fillStyle='#1B2A22';
+  ctx.fillRect(sx-u*.32,sy-u*1.06+bob,u*.14,u*.5);
+
+  // Rumpf mit Weste
   ctx.fillStyle='#2F4A3C';
   ctx.fillRect(sx-u*.24,sy-u*1.15+bob,u*.48,u*.75);
   ctx.fillStyle='#22382E';
   ctx.fillRect(sx-u*.18,sy-u*1.08+bob,u*.36,u*.3);
+  ctx.fillStyle='#3B5C4A';
+  ctx.fillRect(sx-u*.24,sy-u*.72+bob,u*.48,u*.07);
 
+  // Kopf mit Helm und Lichtkante
   ctx.fillStyle='#E7C9A0';
   ctx.beginPath(); ctx.arc(sx,sy-u*1.32+bob,u*.2,0,6.284); ctx.fill();
   ctx.fillStyle='#243A2E';
   ctx.beginPath(); ctx.arc(sx,sy-u*1.38+bob,u*.23,Math.PI,0); ctx.fill();
   ctx.fillRect(sx-u*.23,sy-u*1.38+bob,u*.46,u*.06);
+  ctx.fillStyle='rgba(245,197,66,.35)';
+  ctx.fillRect(sx-u*.2,sy-u*1.52+bob,u*.26,u*.04);
 
   const recoil=flashT>0?-u*.06:0;
   ctx.fillStyle='#1A1F26';
@@ -1220,13 +1351,32 @@ function drawGate(g){
     const x0=px(pa.x0,g.z,s), x1=px(pa.x1,g.z,s);
     const good=pa.p.good;
     const base=good?'86,227,159':'232,70,43';
-    const pulse=.14+Math.sin(tAcc*4+(good?0:2))*.04;
+    const pulse=.12+Math.sin(tAcc*4+(good?0:2))*.04;
     ctx.fillStyle='rgba('+base+','+pulse+')';
     ctx.fillRect(x0,yt,x1-x0,yb-yt);
-    const need=pa.p.op==='+'?3:pa.p.op==='-'?3:pa.p.op==='*'?40:16;
-    const fill=(pa.p.hits%need)/need;
-    ctx.fillStyle='rgba('+base+',.34)';
-    ctx.fillRect(x0,yb-(yb-yt)*fill,x1-x0,(yb-yt)*fill);
+
+    if(good){
+      // Panzerung: der bereits weggeschossene Teil leuchtet auf
+      const p=Math.min(1,pa.p.hits/pa.p.need);
+      ctx.fillStyle='rgba('+base+',.30)';
+      ctx.fillRect(x0,yb-(yb-yt)*p,x1-x0,(yb-yt)*p);
+      // Rissmuster als Fortschrittsanzeige
+      ctx.strokeStyle='rgba(185,255,221,'+(0.15+p*.5)+')'; ctx.lineWidth=Math.max(1,1.4*s);
+      const cx=(x0+x1)/2, cy=(yt+yb)/2;
+      const cracks=Math.floor(p*6);
+      for(let i=0;i<cracks;i++){
+        const a=i/6*6.284+0.4;
+        ctx.beginPath(); ctx.moveTo(cx,cy);
+        ctx.lineTo(cx+Math.cos(a)*(x1-x0)*.42, cy+Math.sin(a)*(yb-yt)*.42);
+        ctx.stroke();
+      }
+    }else{
+      const need=pa.p.op==='-'?3:16;
+      const fill=(pa.p.hits%need)/need;
+      ctx.fillStyle='rgba('+base+',.34)';
+      ctx.fillRect(x0,yb-(yb-yt)*fill,x1-x0,(yb-yt)*fill);
+    }
+
     ctx.strokeStyle='rgba('+base+',.9)'; ctx.lineWidth=Math.max(1,2*s);
     ctx.strokeRect(x0,yt,x1-x0,yb-yt);
     ctx.fillStyle='rgba('+base+',.8)';
@@ -1237,9 +1387,13 @@ function drawGate(g){
     ctx.fillStyle=good?'#B9FFDD':'#FFC7BB';
     ctx.font='900 '+Math.max(10,1.25*PPU*s)+'px "Arial Narrow",system-ui,sans-serif';
     ctx.textAlign='center'; ctx.textBaseline='middle';
-    ctx.fillText(sym+pa.p.v,(x0+x1)/2,(yt+yb)/2);
-    if(!good){
-      ctx.font='700 '+Math.max(7,.34*PPU*s)+'px system-ui,sans-serif';
+    ctx.fillText(sym+pa.p.v,(x0+x1)/2,(yt+yb)/2-((yb-yt)*.06));
+    ctx.font='700 '+Math.max(7,.36*PPU*s)+'px system-ui,sans-serif';
+    if(good){
+      const left=Math.max(0,pa.p.need-pa.p.hits);
+      ctx.fillStyle='rgba(185,255,221,.85)';
+      ctx.fillText(left+' TREFFER',(x0+x1)/2,yb-(yb-yt)*.14);
+    }else{
       ctx.fillStyle='rgba(255,199,187,.8)';
       ctx.fillText('NICHT SCHIESSEN',(x0+x1)/2,yt+(yb-yt)*.16);
     }
@@ -1519,8 +1673,26 @@ function render(t){
     const s=sc(p.z); if(s<=.02) continue;
     ctx.globalAlpha=Math.max(0,Math.min(1,p.t*3));
     ctx.fillStyle=p.c;
-    const r=p.r*PPU*s*(p.kind==='flash'?1.6:1);
-    ctx.beginPath(); ctx.arc(px(p.x,p.z,s),py(p.z,s,1),Math.max(.8,r),0,6.284); ctx.fill();
+    const r=p.r*PPU*s*(p.kind==='flash'?1.6:p.kind==='smoke'?2.2:1);
+    if(p.kind==='shard'){
+      ctx.fillRect(px(p.x,p.z,s)-r/2,py(p.z,s,1.4)-r/2,r,r*.6);
+    }else{
+      ctx.beginPath(); ctx.arc(px(p.x,p.z,s),py(p.z,s,1),Math.max(.8,r),0,6.284); ctx.fill();
+    }
+    ctx.globalAlpha=1;
+  }
+
+  // Patronenhülsen
+  for(const c of casings){
+    const s=sc(c.z); if(s<=.02) continue;
+    const u=PPU*s;
+    ctx.save();
+    ctx.globalAlpha=Math.min(1,c.t*2);
+    ctx.translate(px(c.x,c.z,s),py(c.z,s,c.y));
+    ctx.rotate(c.rot);
+    ctx.fillStyle='#D9B24C';
+    ctx.fillRect(-u*.06,-u*.03,u*.12,u*.06);
+    ctx.restore();
     ctx.globalAlpha=1;
   }
 
@@ -1565,28 +1737,15 @@ function start(){
   reset(); state='play';
   screenEl.classList.add('hidden');
 }
-function overrun(){
-  if(state!=='play') return;
-  shake=.6;
-  SFX.bite();
-  gameOver('durchbruch');
-}
-
 function gameOver(reason){
   if(state!=='play') return;
   state='over';
   SFX.over();
   const m=dist|0;
   const isNew = qualifies(m) && (!scores.length || m>scores[0].m);
-  if(reason==='durchbruch'){
-    kickEl.textContent='Linie durchbrochen';
-    titleEl.innerHTML='Durchbruch<em>bei Meter '+m+'</em>';
-    rulesEl.innerHTML='Kein Zombie darf durch. <b>Der Trupp bremst automatisch ab</b>, wenn die Horde dicht auf ist – nutz die Zeit zum Schießen statt auszuweichen.';
-  }else{
-    kickEl.textContent='Trupp ausgelöscht';
-    titleEl.innerHTML='Aufgerieben<em>bei Meter '+m+'</em>';
-    rulesEl.innerHTML='Merk dir: <span class="bad">rote Tore werden durch Treffer schlimmer</span>, und <span class="bad">Fallen treffen deinen Trupp genauso wie die Zombies</span>.';
-  }
+  kickEl.textContent='Der Trupp ist aufgefressen';
+  titleEl.innerHTML='Aufgefressen<em>bei Meter '+m+'</em>';
+  rulesEl.innerHTML='Tipp: <b>grüne Tore freischießen</b>, sonst bringen sie nichts. Und <span class="bad">Stacheln töten genau den Teil des Trupps, der darüberläuft</span> – schmal drüber, nicht breit.';
   scoreEl.hidden=false; scoreEl.textContent=m+' m';
   bestEl.hidden=false;
   bestEl.innerHTML = isNew
@@ -1614,7 +1773,7 @@ nameIn.addEventListener('keydown',e=>{
 });
 
 // Test-Hook für Balancing (beeinflusst das Spiel nicht)
-try{ window.__bdu={ get:()=>({squad,dist,squadX,pressure,zombies,boss,state}), aim:v=>{targetX=Math.max(-ROAD+1,Math.min(ROAD-1,v));} }; }catch(e){}
+try{ window.__bdu={ get:()=>({squad,dist,squadX,pressure,zombies,boss,state,gates,crates,traps,weap}), aim:v=>{targetX=Math.max(-ROAD+1,Math.min(ROAD-1,v));} }; }catch(e){}
 
 resize(); reset(); loadScores(); renderScores(); listEl.hidden=!scores.length; listTitleEl.hidden=!scores.length;
 requestAnimationFrame(loop);
