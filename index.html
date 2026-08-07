@@ -1026,7 +1026,7 @@ function hurtZombie(idx,dmg,hx){
   if(zb.hp<=0){
     zombies.splice(idx,1);
     SFX.zombieDie();
-    dying.push({x:zb.x,z:zb.z,t:.45,max:.45,big:zb.big,dir:Math.random()<.5?-1:1,ph:zb.ph});
+    dying.push({x:zb.x,z:zb.z,t:.45,max:.45,big:zb.big,dir:Math.random()<.5?-1:1,ph:zb.ph,v:zb.v});
     decals.push({x:zb.x,z:zb.z,r:zb.big?1.4:.8,a:.55});
     if(decals.length>40) decals.shift();
     for(let k=0;k<8;k++) parts.push({x:zb.x+rnd(-.6,.6),z:zb.z,t:rnd(.3,.6),r:rnd(.2,.5),c:k%2?'#8E1A12':'#C4271A',kind:'blood'});
@@ -1135,13 +1135,24 @@ let sky=null, stars=null;
 function drawSky(){
   const B=BIOMES[biome];
   if(!sky){
-    sky=ctx.createLinearGradient(0,0,0,HZ+40);
+    sky=ctx.createLinearGradient(0,0,0,HZ);
     sky.addColorStop(0,B.sky[0]);
     sky.addColorStop(.55,B.sky[1]);
     sky.addColorStop(1,B.sky[2]);
   }
-  ctx.fillStyle=sky; ctx.fillRect(0,0,W,HZ+40);
-  ctx.fillStyle='#05070A'; ctx.fillRect(0,HZ+38,W,H-HZ);
+  // Der Himmel endet am Horizont - darunter beginnt sofort die Tiefe,
+  // sonst steht ein heller Streifen unter der Silhouette.
+  ctx.fillStyle=sky; ctx.fillRect(0,0,W,HZ+2);
+  // Wichtig: durchgehend deckend. Der Canvas läuft ohne Alpha und wird nie
+  // geleert - ein halbtransparenter Verlauf würde das Vorbild durchscheinen
+  // lassen. Der Dunstton wird deshalb vorab in die Tiefenfarbe eingerechnet.
+  const fg=B.fog.split(',');
+  const mix=a=>'rgb('+Math.round(5+(fg[0]-5)*a)+','+Math.round(7+(fg[1]-7)*a)+','+Math.round(10+(fg[2]-10)*a)+')';
+  const und=ctx.createLinearGradient(0,HZ,0,HZ+130);
+  und.addColorStop(0,mix(.20));
+  und.addColorStop(.32,mix(.04));
+  und.addColorStop(1,'#05070A');
+  ctx.fillStyle=und; ctx.fillRect(0,HZ,W,H-HZ);
 
   if(!stars){
     stars=[];
@@ -1174,7 +1185,7 @@ function drawSky(){
 
   const fog=ctx.createLinearGradient(0,HZ-40,0,HZ+70);
   fog.addColorStop(0,'rgba('+B.fog+',0)');
-  fog.addColorStop(.55,'rgba('+B.fog+',.32)');
+  fog.addColorStop(.55,'rgba('+B.fog+',.20)');
   fog.addColorStop(1,'rgba(11,14,19,0)');
   ctx.fillStyle=fog; ctx.fillRect(0,HZ-40,W,110);
 }
@@ -1353,45 +1364,138 @@ function drawRoad(){
     }
   }
 
+  if(B.id==='bruecke') drawDeckEdge(fz,nz);
+  if(B.reflect) drawVoidMist(fz,nz);
   drawTowers(B,fz,nz);
   drawEdges(B,fz,nz);
+  if(B.id==='bruecke') drawSuspension(fz,nz);
 
-  const dfog=ctx.createLinearGradient(0,py(fz,sf,0),0,py(30,sc(30),0));
+  const dz=30, sd=sc(dz);
+  const dfog=ctx.createLinearGradient(0,py(fz,sf,0),0,py(dz,sd,0));
   dfog.addColorStop(0,'rgba(30,45,55,.55)');
   dfog.addColorStop(1,'rgba(30,45,55,0)');
   ctx.fillStyle=dfog;
-  ctx.fillRect(0,py(fz,sf,0)-2,W,py(30,sc(30),0)-py(fz,sf,0)+4);
+  ctx.beginPath();
+  ctx.moveTo(px(-ROAD,fz,sf),py(fz,sf,0)); ctx.lineTo(px(ROAD,fz,sf),py(fz,sf,0));
+  ctx.lineTo(px(ROAD,dz,sd),py(dz,sd,0));  ctx.lineTo(px(-ROAD,dz,sd),py(dz,sd,0));
+  ctx.closePath(); ctx.fill();
+}
+
+// ---------------------------------------------------------------- Hängewerk
+// Pylonenabstand und Seilhöhe hängen zusammen: das Tragseil sitzt genau dort
+// oben, wo ein Pylon steht, und hängt dazwischen als Parabel durch.
+const BRIDGE_GAP=110, PYL_H=15, CABLE_LOW=1.9;
+function bridgePhase(z){
+  const t=(z+dist)/BRIDGE_GAP;
+  return t-Math.floor(t);
+}
+function cableH(z){
+  const c=Math.abs(2*bridgePhase(z)-1);
+  return CABLE_LOW+(PYL_H-CABLE_LOW)*c*c;
+}
+function drawSuspension(fz,nz){
+  for(const side of [-1,1]){
+    const X=ROAD*side;
+    // Hänger zuerst, damit das Tragseil darüber liegt
+    const off=dist%5;
+    ctx.strokeStyle='rgba(120,142,168,.32)';
+    for(let i=0;i<34;i++){
+      const z=i*5-off; if(z<nz||z>fz) continue;
+      const s=sc(z); if(s<.10) continue;
+      const h=cableH(z); if(h<CABLE_LOW+.5) continue;
+      ctx.lineWidth=Math.max(.6,.045*PPU*s);
+      ctx.beginPath();
+      ctx.moveTo(px(X,z,s),py(z,s,h));
+      ctx.lineTo(px(X,z,s),py(z,s,1.3));
+      ctx.stroke();
+    }
+    // Tragseil als Fläche, damit es in der Nähe dicker wird
+    ctx.fillStyle='rgba(150,170,196,.55)';
+    ctx.beginPath();
+    for(let z=fz;z>=nz;z-=2){ const s=sc(z); ctx.lineTo(px(X,z,s),py(z,s,cableH(z)+.17)); }
+    for(let z=nz;z<=fz;z+=2){ const s=sc(z); ctx.lineTo(px(X,z,s),py(z,s,cableH(z)-.17)); }
+    ctx.closePath(); ctx.fill();
+  }
+}
+
+// Die Fahrbahn hat Dicke: Randträger und Querstreben unter dem Belag
+function drawDeckEdge(fz,nz){
+  for(const side of [-1,1]){
+    const X=ROAD*side;
+    ctx.fillStyle='#0A1119';
+    ctx.beginPath();
+    for(let z=fz;z>=nz;z-=4){ const s=sc(z); ctx.lineTo(px(X,z,s),py(z,s,0)); }
+    for(let z=nz;z<=fz;z+=4){ const s=sc(z); ctx.lineTo(px(X,z,s),py(z,s,-.6)); }
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle='#151F2B';
+    ctx.beginPath();
+    for(let z=fz;z>=nz;z-=4){ const s=sc(z); ctx.lineTo(px(X,z,s),py(z,s,0)); }
+    for(let z=nz;z<=fz;z+=4){ const s=sc(z); ctx.lineTo(px(X,z,s),py(z,s,-.14)); }
+    ctx.closePath(); ctx.fill();
+  }
+  // Querstreben, die unter der Fahrbahn vorbeiziehen
+  const off=dist%6;
+  ctx.fillStyle='#0D1620';
+  for(let i=0;i<26;i++){
+    const z=i*6-off; if(z<nz||z>fz) continue;
+    const s=sc(z); if(s<.18) continue;
+    ctx.fillRect(px(-ROAD,z,s),py(z,s,0),px(ROAD,z,s)-px(-ROAD,z,s),Math.max(1,.34*PPU*s));
+  }
+}
+
+// Dunst in der Tiefe neben der Fahrbahn - deutet den Abgrund an
+function drawVoidMist(fz,nz){
+  const B=BIOMES[biome];
+  for(let i=0;i<5;i++){
+    const z=((i*29+dist*.35)%150)-5;
+    if(z<nz||z>fz) continue;
+    const s=sc(z);
+    const yv=py(z,s,-1.2);
+    const a=.085*Math.min(1,s*2.2);
+    ctx.fillStyle='rgba('+B.fog+','+a+')';
+    for(const side of [-1,1]){
+      ctx.beginPath();
+      ctx.ellipse(px(ROAD*side*1.8,z,s),yv,3.4*PPU*s,.5*PPU*s,0,0,6.284);
+      ctx.fill();
+    }
+  }
 }
 
 // Große Bauwerke, die in regelmäßigen Abständen vorbeiziehen
 function drawTowers(B,fz,nz){
   if(B.towers==='none') return;
-  const GAP=B.towers==='wall'?110:130;
+  const GAP=B.towers==='wall'?110:BRIDGE_GAP;
   const to=dist%GAP;
-  for(let i=0;i<3;i++){
-    const z=i*GAP-to+30;
+  for(let i=0;i<4;i++){
+    const z=i*GAP-to+(B.towers==='wall'?30:0);
     if(z<nz||z>fz) continue;
     const s=sc(z);
     const yb=py(z,s,0);
     const xl=px(-ROAD,z,s), xr=px(ROAD,z,s);
 
     if(B.towers==='pylon'){
-      const yt=py(z,s,15);
-      const pw=Math.max(2,.55*PPU*s);
+      // Zwei nach oben verjüngte Beine, oberer und mittlerer Querträger,
+      // dazwischen ein Kreuzverband. Die Tragseile hängen am Kopf.
+      const yt=py(z,s,PYL_H), ym=py(z,s,PYL_H*.60);
+      const pw=Math.max(2.2,.66*PPU*s), pt=Math.max(1.4,.38*PPU*s);
       ctx.fillStyle='#22303F';
-      ctx.fillRect(xl-pw/2,yt,pw,yb-yt);
-      ctx.fillRect(xr-pw/2,yt,pw,yb-yt);
-      ctx.fillRect(xl-pw/2,yt,xr-xl+pw,Math.max(2,.5*PPU*s));
+      for(const X of [xl,xr]){
+        ctx.beginPath();
+        ctx.moveTo(X-pw/2,yb); ctx.lineTo(X+pw/2,yb);
+        ctx.lineTo(X+pt/2,yt); ctx.lineTo(X-pt/2,yt);
+        ctx.closePath(); ctx.fill();
+      }
+      ctx.strokeStyle='rgba(110,132,158,.30)'; ctx.lineWidth=Math.max(1,.09*PPU*s);
+      ctx.beginPath();
+      ctx.moveTo(xl,ym); ctx.lineTo(xr,yt);
+      ctx.moveTo(xr,ym); ctx.lineTo(xl,yt);
+      ctx.stroke();
+      ctx.fillStyle='#2C3C4D';
+      ctx.fillRect(xl-pt/2,yt,xr-xl+pt,Math.max(2,.55*PPU*s));
+      ctx.fillRect(xl-pt/2,ym,xr-xl+pt,Math.max(1.4,.3*PPU*s));
       ctx.fillStyle='rgba(232,70,43,'+(.5+Math.sin(tAcc*3+i)*.3)+')';
       ctx.beginPath(); ctx.arc(xl,yt,Math.max(1.5,.14*PPU*s),0,6.284); ctx.fill();
       ctx.beginPath(); ctx.arc(xr,yt,Math.max(1.5,.14*PPU*s),0,6.284); ctx.fill();
-      ctx.strokeStyle='rgba(120,140,165,.35)'; ctx.lineWidth=1;
-      for(const dz of [-40,-25,-12,12,25,40]){
-        const z2=z+dz; if(z2<nz||z2>fz) continue;
-        const s2=sc(z2);
-        ctx.beginPath(); ctx.moveTo(xl,yt); ctx.lineTo(px(-ROAD,z2,s2),py(z2,s2,1.35)); ctx.stroke();
-        ctx.beginPath(); ctx.moveTo(xr,yt); ctx.lineTo(px(ROAD,z2,s2),py(z2,s2,1.35)); ctx.stroke();
-      }
     }else if(B.towers==='wall'){
       // Wehrtürme links und rechts mit Zinnenkranz
       const yt=py(z,s,7.5);
@@ -1484,14 +1588,23 @@ function drawEdges(B,fz,nz){
         ctx.fillRect(bx-.1*PPU*s,by-hgt*PPU*s,.2*PPU*s,hgt*PPU*s);
         const gx=bx-side*(B.light==='torch'?.3:1.1)*PPU*s, gy=by-hgt*PPU*s;
         const flicker=(B.light==='torch'?.55:.5)+Math.sin(tAcc*(B.light==='torch'?11:7)+i*3)*(B.light==='torch'?.16:.06);
-        const halo=ctx.createRadialGradient(gx,gy,0,gx,gy,3.4*PPU*s);
-        halo.addColorStop(0,'rgba('+B.lamp+','+flicker+')');
+        // Leuchtkörper mit kleinem Kern und knappem Halo
+        const R=1.9*PPU*s;
+        const halo=ctx.createRadialGradient(gx,gy,0,gx,gy,R);
+        halo.addColorStop(0,'rgba('+B.lamp+','+(flicker*.85)+')');
+        halo.addColorStop(.35,'rgba('+B.lamp+','+(flicker*.22)+')');
         halo.addColorStop(1,'rgba('+B.lamp+',0)');
         ctx.fillStyle=halo;
-        ctx.beginPath(); ctx.arc(gx,gy,3.4*PPU*s,0,6.284); ctx.fill();
-        ctx.fillStyle='rgba('+B.lamp+',.05)';
+        ctx.beginPath(); ctx.arc(gx,gy,R,0,6.284); ctx.fill();
+        ctx.fillStyle='rgba(255,248,225,'+Math.min(.9,flicker+.25)+')';
+        ctx.beginPath(); ctx.arc(gx,gy,Math.max(1,.16*PPU*s),0,6.284); ctx.fill();
+        // Lichtkegel auf dem Belag
+        const pool=ctx.createRadialGradient(px(X-side*1.1,z,s),by,0,px(X-side*1.1,z,s),by,2.0*PPU*s);
+        pool.addColorStop(0,'rgba('+B.lamp+',.10)');
+        pool.addColorStop(1,'rgba('+B.lamp+',0)');
+        ctx.fillStyle=pool;
         ctx.beginPath();
-        ctx.ellipse(px(X-side*1.1,z,s),by,2.6*PPU*s,.7*PPU*s,0,0,6.284);
+        ctx.ellipse(px(X-side*1.1,z,s),by,2.0*PPU*s,.55*PPU*s,0,0,6.284);
         ctx.fill();
         if(B.reflect){
           const rz=Math.max(-3,z-9), rs=sc(rz);
@@ -1511,158 +1624,368 @@ function drawEdges(B,fz,nz){
   }
 }
 
+// ---------------------------------------------------------------- Zombie
+// Jeder Untote zieht sein Aussehen aus seiner ID: Statur, Hautton, Lumpen,
+// Gangbild, fehlende Gliedmaßen. Gleiche ID = gleiche Figur, ohne dass beim
+// Spawnen etwas mitgegeben werden muss. Die Tabelle wird beim ersten Zeichnen
+// einmal berechnet und am Zombie zwischengespeichert.
+function zrnd(id,k){ const n=Math.sin(id*12.9898+k*78.233)*43758.5453; return n-Math.floor(n); }
+const ZSKIN=[
+  ['#4E8C5E','#3E7050','#6FAF7C'],   // Standardgrün
+  ['#5A9A66','#467953','#7CBA88'],
+  ['#6E8F5A','#556F47','#8FB077'],   // gelblich
+  ['#4A8078','#3A6660','#6BA79C'],   // ertrunken
+  ['#86935A','#68743F','#A6B279'],
+  ['#7A6E62','#5C534A','#9A8D7E']    // ausgetrocknet
+];
+const ZBIG=[
+  ['#7BAE4C','#5E8A3C','#A8CE74'],
+  ['#6FA85E','#548049','#9CCB86']
+];
+const ZRAG=['#3A3A46','#4A3B2E','#2E3A4A','#4A2E33','#33402E','#463F32'];
+function zVariant(zb){
+  const id=zb.id||1, r=k=>zrnd(id,k);
+  const pal = zb.big ? ZBIG[Math.floor(r(1)*ZBIG.length)] : ZSKIN[Math.floor(r(1)*ZSKIN.length)];
+  return {
+    h: zb.big ? .95+r(2)*.16 : .86+r(2)*.30,      // Körpergröße
+    w: .88+r(3)*.34,                              // Statur
+    skin:pal[0], skinDk:pal[1], skinLt:pal[2],
+    rag: ZRAG[Math.floor(r(4)*ZRAG.length)],
+    shirt: r(5)<.72,                              // manche laufen mit nacktem Oberkörper
+    arm: r(6)<.15 ? (r(7)<.5?-1:1) : 0,           // abgerissener Arm
+    limp: r(9)*.8,                                // Hinken: ein Bein bleibt steif
+    limpSide: r(10)<.5?-1:1,
+    tilt: (r(11)-.5)*.7,                          // dauerhafte Kopfneigung
+    reach: .45+r(12)*.95,                         // wie weit die Arme greifen
+    hair: r(13)<.4,
+    jaw: r(14)<.55,                               // aufgerissener Kiefer
+    eye: r(15)<.18?'#F5C542':'#E8462B',
+    wound: r(16)<.45
+  };
+}
+
 function drawZombie(zb){
   const s=sc(zb.z); if(s<=.02) return;
-  const u=PPU*s*(zb.big?1.9:1);
+  const v=zb.v||(zb.v=zVariant(zb));
+  const u=PPU*s*(zb.big?1.9:1)*v.h;
   const x=px(zb.x,zb.z,s), y=py(zb.z,s,0);
   const flash=zb.hit>0;
+  const skin =flash?'#EAFBF0':v.skin;
+  const skinD=flash?'#DFF5E5':v.skinDk;
+  const skinL=flash?'#FFFFFF':v.skinLt;
+  const rag  =flash?'#F2FFF6':v.rag;
 
   ctx.fillStyle='rgba(0,0,0,.35)';
   ctx.beginPath(); ctx.ellipse(x,y,u*.42,u*.13,0,0,6.284); ctx.fill();
 
-  // ---- Fressender Zombie: gebeugt über sein Opfer, zuckende Schultern ----
-  if(zb.feed>0){
-    const gnaw=Math.sin(zb.ph*3)*.09*u;
-    ctx.save();
-    ctx.translate(x,y);
-    ctx.rotate(.55);
-    ctx.fillStyle=flash?'#EAFBF0':(zb.big?'#7BAE4C':'#4E8C5E');
-    ctx.fillRect(-u*.3,-u*1.15,u*.6,u*.85);
-    ctx.fillRect(-u*.62,-u*1.0+gnaw,u*.36,u*.18);
-    ctx.fillRect(u*.26,-u*1.0-gnaw,u*.36,u*.18);
-    ctx.fillStyle=flash?'#FFFFFF':(zb.big?'#A8CE74':'#6FAF7C');
-    ctx.beginPath(); ctx.arc(0,-u*1.35+gnaw*.5,u*.27,0,6.284); ctx.fill();
-    ctx.fillStyle='#8E1A12';
-    ctx.fillRect(-u*.12,-u*1.2,u*.24,u*.08);
-    ctx.restore();
-    // Blutspritzer beim Fressen
-    if(Math.random()<.25)
-      parts.push({x:zb.x+rnd(-.4,.4),z:zb.z,t:.3,r:rnd(.1,.3),c:'#C4271A',kind:'blood'});
-    ctx.fillStyle='rgba(122,22,16,.5)';
-    ctx.beginPath(); ctx.ellipse(x,y,u*.5,u*.16,0,0,6.284); ctx.fill();
-    if(zb.max>3){
-      const w=u*.66, p=Math.max(0,zb.hp/zb.max);
-      ctx.fillStyle='rgba(0,0,0,.6)'; ctx.fillRect(x-w/2,y-u*1.7,w,u*.11);
-      ctx.fillStyle='#E8462B'; ctx.fillRect(x-w/2,y-u*1.7,w*p,u*.11);
+  if(zb.feed>0){ drawZombieFeeding(zb,v,x,y,u,skin,skinD,skinL,rag); }
+  else{
+    const p=zb.ph;
+    const bob=-Math.abs(Math.sin(p))*.045*u;
+    const hipY=y-u*.55+bob, shY=y-u*1.18+bob;
+
+    // ---- Beine: eines schleift, wenn die Variante hinkt ----
+    for(const side of [-1,1]){
+      const lp=p+(side<0?0:Math.PI);
+      const stiff = side===v.limpSide ? 1-v.limp : 1;
+      const lift=Math.max(0,Math.sin(lp))*stiff;
+      const hx=x+side*u*.11*v.w, hy=hipY;
+      const fx=x+side*u*.16*v.w+side*lift*u*.05;
+      const fy=y-lift*u*.26;
+      const kx=(hx+fx)*.5+side*u*.06;
+      const ky=(hy+fy)*.5-lift*u*.04;
+      limbSeg(hx,hy,kx,ky,u*.20,u*.16,skinD);
+      limbSeg(kx,ky,fx,fy,u*.16,u*.12,skinD);
+      ctx.fillStyle='#1A2A20';
+      ctx.beginPath(); ctx.ellipse(fx,fy+u*.02,u*.10,u*.06,0,0,6.284); ctx.fill();
     }
-    return;
+
+    // ---- Rumpf mit Lumpen und offener Wunde ----
+    ctx.save();
+    ctx.translate(x,shY); ctx.rotate(Math.sin(p*.5)*.09+v.tilt*.12);
+    ctx.fillStyle=skin;
+    ctx.beginPath();
+    ctx.moveTo(-u*.26*v.w,0); ctx.lineTo(u*.26*v.w,0);
+    ctx.lineTo(u*.20*v.w,u*.62); ctx.lineTo(-u*.20*v.w,u*.62);
+    ctx.closePath(); ctx.fill();
+    if(v.shirt){
+      ctx.fillStyle=rag;
+      ctx.beginPath();
+      ctx.moveTo(-u*.27*v.w,u*.02); ctx.lineTo(u*.27*v.w,u*.02);
+      ctx.lineTo(u*.22*v.w,u*.40); ctx.lineTo(u*.07*v.w,u*.29);
+      ctx.lineTo(-u*.04*v.w,u*.44); ctx.lineTo(-u*.22*v.w,u*.33);
+      ctx.closePath(); ctx.fill();                 // zerfetzter Saum
+    }
+    if(v.wound){
+      ctx.fillStyle='#8E1A12'; ctx.fillRect(-u*.11*v.w,u*.14,u*.16,u*.07);
+      ctx.fillStyle='#C4271A'; ctx.fillRect(-u*.09*v.w,u*.16,u*.10,u*.03);
+    }
+    ctx.restore();
+
+    // ---- Arme greifen nach vorn, einer fehlt manchmal ----
+    for(const side of [-1,1]){
+      const sx0=x+side*u*.24*v.w, sy0=shY+u*.06;
+      if(v.arm===side){
+        limbSeg(sx0,sy0,sx0+side*u*.20,sy0+u*.26,u*.17,u*.12,skin);
+        ctx.fillStyle='#8E1A12';
+        ctx.beginPath(); ctx.arc(sx0+side*u*.20,sy0+u*.26,u*.07,0,6.284); ctx.fill();
+        continue;
+      }
+      const swing=Math.sin(p*1.15+(side<0?0:1.7))*.10*u;
+      const ex=sx0+side*u*.34, ey=sy0+u*.26-swing;
+      const hx2=ex+side*u*.02, hy2=ey+u*.46-v.reach*u*.26+swing*.6;
+      limbSeg(sx0,sy0,ex,ey,u*.17,u*.13,skin);
+      limbSeg(ex,ey,hx2,hy2,u*.13,u*.10,skinL);
+      ctx.fillStyle=skinL;
+      ctx.beginPath(); ctx.arc(hx2,hy2,u*.075,0,6.284); ctx.fill();
+      ctx.fillStyle=skinD;
+      for(let k=-1;k<=1;k++) ctx.fillRect(hx2+k*u*.045-u*.012,hy2+u*.04,u*.024,u*.06);
+    }
+
+    // ---- Kopf: rollt im Takt, Kiefer klappt ----
+    ctx.save();
+    ctx.translate(x+Math.sin(p*.7)*u*.04, shY-u*.15);
+    ctx.rotate(Math.sin(p*.6)*.14+v.tilt*.5);
+    ctx.fillStyle=skinD; ctx.fillRect(-u*.08,-u*.08,u*.16,u*.28);   // Hals bis in den Rumpf
+    ctx.fillStyle=skinL;
+    ctx.beginPath(); ctx.arc(0,-u*.21,u*.24,0,6.284); ctx.fill();
+    if(v.hair){
+      ctx.fillStyle='#2A2620';
+      ctx.beginPath(); ctx.arc(0,-u*.24,u*.24,Math.PI*1.02,Math.PI*1.98); ctx.fill();
+    }
+    ctx.fillStyle=v.eye;
+    ctx.fillRect(-u*.15,-u*.25,u*.09,u*.06);
+    ctx.fillRect(u*.06,-u*.25,u*.09,u*.06);
+    ctx.fillStyle='#1A1010';
+    if(v.jaw){
+      ctx.beginPath();
+      ctx.moveTo(-u*.10,-u*.10); ctx.lineTo(u*.10,-u*.10);
+      ctx.lineTo(0,u*.02+Math.abs(Math.sin(p*2))*u*.05);
+      ctx.closePath(); ctx.fill();
+    }else{
+      ctx.fillRect(-u*.09,-u*.09,u*.18,u*.045);
+    }
+    ctx.restore();
   }
-
-  const sway=Math.sin(zb.ph)*.1*u;
-  const lurch=Math.abs(Math.sin(zb.ph*.5))*.06*u;
-  const step=Math.sin(zb.ph);
-  ctx.fillStyle=flash?'#DFF5E5':(zb.big?'#5E8A3C':'#3E7050');
-  ctx.fillRect(x-u*.22+step*u*.08, y-u*.5, u*.16, u*.5);
-  ctx.fillRect(x+u*.06-step*u*.08, y-u*.5, u*.16, u*.5);
-
-  ctx.fillStyle=flash?'#EAFBF0':(zb.big?'#7BAE4C':'#4E8C5E');
-  ctx.fillRect(x-u*.3+sway,y-u*1.35+lurch,u*.6,u*.9);
-  ctx.fillStyle=flash?'#DFF5E5':(zb.big?'#6B9E42':'#427C52');
-  ctx.fillRect(x-u*.3+sway,y-u*.5+lurch,u*.18,u*.08);
-  ctx.fillRect(x+u*.05+sway,y-u*.48+lurch,u*.14,u*.06);
-
-  const arm=Math.sin(zb.ph*1.3)*.06*u;
-  ctx.fillStyle=flash?'#EAFBF0':(zb.big?'#7BAE4C':'#4E8C5E');
-  ctx.fillRect(x-u*.66+sway,y-u*1.28+lurch+arm,u*.38,u*.16);
-  ctx.fillRect(x+u*.28+sway,y-u*1.28+lurch-arm,u*.38,u*.16);
-  ctx.fillStyle=flash?'#FFFFFF':(zb.big?'#A8CE74':'#6FAF7C');
-  ctx.fillRect(x-u*.72+sway,y-u*1.3+lurch+arm,u*.12,u*.2);
-  ctx.fillRect(x+u*.6+sway,y-u*1.3+lurch-arm,u*.12,u*.2);
-
-  ctx.save();
-  ctx.translate(x+sway,y-u*1.55+lurch);
-  ctx.rotate(Math.sin(zb.ph*.7)*.15+.1);
-  ctx.fillStyle=flash?'#FFFFFF':(zb.big?'#A8CE74':'#6FAF7C');
-  ctx.beginPath(); ctx.arc(0,0,u*.26,0,6.284); ctx.fill();
-  ctx.fillStyle='#E8462B';
-  ctx.fillRect(-u*.16,-u*.07,u*.1,u*.07);
-  ctx.fillRect(u*.06,-u*.07,u*.1,u*.07);
-  ctx.fillStyle='#1A2A20';
-  ctx.fillRect(-u*.1,u*.1,u*.2,u*.05);
-  ctx.restore();
 
   if(zb.max>3){
-    const w=u*.66, p=Math.max(0,zb.hp/zb.max);
-    ctx.fillStyle='rgba(0,0,0,.6)'; ctx.fillRect(x-w/2,y-u*1.98,w,u*.11);
-    ctx.fillStyle='#E8462B'; ctx.fillRect(x-w/2,y-u*1.98,w*p,u*.11);
+    const w=u*.66, p2=Math.max(0,zb.hp/zb.max);
+    const by=zb.feed>0?y-u*1.34:y-u*2.02;
+    ctx.fillStyle='rgba(0,0,0,.6)'; ctx.fillRect(x-w/2,by,w,u*.11);
+    ctx.fillStyle='#E8462B'; ctx.fillRect(x-w/2,by,w*p2,u*.11);
   }
+}
+
+// Über sein Opfer gebeugt: Hocke, zuckende Schultern, beißender Kopf
+function drawZombieFeeding(zb,v,x,y,u,skin,skinD,skinL,rag){
+  const gn=Math.sin(zb.ph*3)*u*.05;
+  // tiefe Hocke: Knie weit auseinander, Füße am Boden
+  for(const side of [-1,1]){
+    limbSeg(x+side*u*.13,y-u*.48, x+side*u*.38,y-u*.26, u*.20,u*.16, skinD);
+    limbSeg(x+side*u*.38,y-u*.26, x+side*u*.27,y-u*.02, u*.16,u*.12, skinD);
+  }
+  // gebeugter Rücken, im Kaurhythmus zuckend
+  limbSeg(x,y-u*.50, x,y-u*.88+gn*.4, u*.46,u*.52, skin);
+  if(v.shirt){ ctx.fillStyle=rag; ctx.fillRect(x-u*.25,y-u*.84,u*.50,u*.28); }
+  // Arme graben nach unten ins Opfer
+  for(const side of [-1,1]){
+    limbSeg(x+side*u*.25,y-u*.80, x+side*u*.46,y-u*.44+gn*side, u*.17,u*.13, skin);
+    limbSeg(x+side*u*.46,y-u*.44+gn*side, x+side*u*.36,y-u*.04, u*.13,u*.10, skinL);
+  }
+  // Kopf hängt tief über der Beute
+  ctx.fillStyle=skinL;
+  ctx.beginPath(); ctx.arc(x,y-u*1.00+gn,u*.25,0,6.284); ctx.fill();
+  ctx.fillStyle='#8E1A12';
+  ctx.fillRect(x-u*.13,y-u*.94+gn,u*.26,u*.09);
+  ctx.fillStyle=v.eye;
+  ctx.fillRect(x-u*.14,y-u*1.10+gn,u*.08,u*.05);
+  ctx.fillRect(x+u*.06,y-u*1.10+gn,u*.08,u*.05);
+
+  if(Math.random()<.25)
+    parts.push({x:zb.x+rnd(-.4,.4),z:zb.z,t:.3,r:rnd(.1,.3),c:'#C4271A',kind:'blood'});
+  ctx.fillStyle='rgba(122,22,16,.5)';
+  ctx.beginPath(); ctx.ellipse(x,y,u*.5,u*.16,0,0,6.284); ctx.fill();
 }
 
 function drawDying(d){
   const s=sc(Math.max(d.z,0)); if(s<=.02) return;
-  const u=PPU*s*(d.big?1.9:1);
+  const v=d.v;
+  const u=PPU*s*(d.big?1.9:1)*(v?v.h:1);
   const x=px(d.x,d.z,s), y=py(d.z,s,0);
   const k=1-d.t/d.max;
+  const skin =v?v.skin :(d.big?'#6B9E42':'#427C52');
+  const skinD=v?v.skinDk:(d.big?'#5E8A3C':'#3E7050');
+  const skinL=v?v.skinLt:(d.big?'#A8CE74':'#6FAF7C');
   ctx.save();
   ctx.globalAlpha=1-k*.6;
   ctx.translate(x,y);
   ctx.rotate(d.dir*k*1.5);
-  ctx.fillStyle=d.big?'#6B9E42':'#427C52';
-  ctx.fillRect(-u*.3,-u*1.2*(1-k*.7),u*.6,u*1.2*(1-k*.4));
-  ctx.fillStyle=d.big?'#A8CE74':'#6FAF7C';
-  ctx.beginPath(); ctx.arc(0,-u*1.35*(1-k),u*.24,0,6.284); ctx.fill();
+  // Beine knicken weg, Arme fallen nach vorn
+  limbSeg(-u*.11,-u*.52,-u*.20-k*u*.18,-u*.16,u*.18,u*.13,skinD);
+  limbSeg( u*.11,-u*.52, u*.20+k*u*.18,-u*.16,u*.18,u*.13,skinD);
+  ctx.fillStyle=skin;
+  ctx.beginPath();
+  ctx.moveTo(-u*.25,-u*1.12*(1-k*.32)); ctx.lineTo(u*.25,-u*1.12*(1-k*.32));
+  ctx.lineTo(u*.19,-u*.48); ctx.lineTo(-u*.19,-u*.48);
+  ctx.closePath(); ctx.fill();
+  limbSeg(-u*.24,-u*1.0*(1-k*.3),-u*.50,-u*.62+k*u*.34,u*.15,u*.11,skin);
+  limbSeg( u*.24,-u*1.0*(1-k*.3), u*.50,-u*.62+k*u*.34,u*.15,u*.11,skin);
+  ctx.fillStyle=skinL;
+  ctx.beginPath(); ctx.arc(0,-u*1.32*(1-k*.42),u*.24,0,6.284); ctx.fill();
   ctx.restore();
   ctx.globalAlpha=1;
+}
+
+// ---------------------------------------------------------------- Soldat
+// Vektor-Skelett statt Rechteckstapel: jedes Körperteil hängt an einem Gelenk,
+// die Pose wird pro Bild aus der Laufphase berechnet. Kein Bildmaterial nötig,
+// alles skaliert mit der Perspektive.
+const SOL={
+  boot:'#131A16', legs:'#233528', cloth:'#2F4A3C', clothDk:'#22382E', clothLt:'#3B5C4A',
+  gear:'#26362B', gearDk:'#18241C', skin:'#E7C9A0', nape:'#A98A63',
+  helm:'#243A2E', helmLt:'#3A5645',
+  metal:'#1A1F26', metalLt:'#39434F'
+};
+// Konisches Segment zwischen zwei Gelenken - der Baustein für Arme und Beine
+function limbSeg(x1,y1,x2,y2,w1,w2,col){
+  const dx=x2-x1, dy=y2-y1, L=Math.hypot(dx,dy)||1;
+  const nx=-dy/L, ny=dx/L;
+  ctx.fillStyle=col;
+  ctx.beginPath();
+  ctx.moveTo(x1+nx*w1*.5,y1+ny*w1*.5);
+  ctx.lineTo(x2+nx*w2*.5,y2+ny*w2*.5);
+  ctx.lineTo(x2-nx*w2*.5,y2-ny*w2*.5);
+  ctx.lineTo(x1-nx*w1*.5,y1-ny*w1*.5);
+  ctx.closePath(); ctx.fill();
 }
 
 function drawSoldier(x,z,t,first){
   const s=sc(z); const u=PPU*s;
   const sx=px(x,z,s), sy=py(z,s,0);
-  const run=t*14+x*3;
-  const bob=Math.sin(run)*.05*u;
-  const step=Math.sin(run);
+  const run=t*13+x*3.1;
+  // Bei sehr großen Trupps zeichnen die hinteren Reihen sparsamer
+  const lite = squad>40 && z<-1.0;
 
   ctx.fillStyle='rgba(0,0,0,.4)';
   ctx.beginPath(); ctx.ellipse(sx,sy,u*.34,u*.11,0,0,6.284); ctx.fill();
 
-  // Stiefel und Beine im Laufzyklus
-  ctx.fillStyle='#233528';
-  ctx.fillRect(sx-u*.18+step*u*.09, sy-u*.42, u*.14, u*.42);
-  ctx.fillRect(sx+u*.04-step*u*.09, sy-u*.42, u*.14, u*.42);
-  ctx.fillStyle='#141C17';
-  ctx.fillRect(sx-u*.2+step*u*.09, sy-u*.08, u*.18, u*.08);
-  ctx.fillRect(sx+u*.02-step*u*.09, sy-u*.08, u*.18, u*.08);
+  // Wurzelgelenke: Becken und Schulter federn im Laufrhythmus
+  const bob=-Math.abs(Math.sin(run))*.06*u;
+  const roll=Math.sin(run)*.055;
+  const hipY=sy-u*.60+bob;
+  const shY =sy-u*1.14+bob;
 
-  // Rucksack hinter dem Rumpf
-  ctx.fillStyle='#1B2A22';
-  ctx.fillRect(sx-u*.32,sy-u*1.06+bob,u*.14,u*.5);
+  // ---- Beine: Hüfte -> Knie -> Fuß, versetzt um eine halbe Phase ----
+  for(const side of [-1,1]){
+    const ph=run+(side<0?0:Math.PI);
+    const lift=Math.max(0,Math.sin(ph));
+    const hx=sx+side*u*.09, hy=hipY;
+    const fx=sx+side*u*.12+side*lift*u*.03;
+    const fy=sy-lift*u*.36;
+    const kx=(hx+fx)*.5+side*u*.05;
+    const ky=(hy+fy)*.5-lift*u*.06;
+    limbSeg(hx,hy,kx,ky,u*.20,u*.17,SOL.legs);
+    limbSeg(kx,ky,fx,fy,u*.17,u*.13,SOL.legs);
+    ctx.save();
+    ctx.translate(fx,fy+u*.02); ctx.rotate(side*lift*.35);
+    ctx.fillStyle=SOL.boot;
+    ctx.beginPath(); ctx.ellipse(0,0,u*.115,u*.07,0,0,6.284); ctx.fill();
+    ctx.restore();
+  }
 
-  // Rumpf mit Weste
-  ctx.fillStyle='#2F4A3C';
-  ctx.fillRect(sx-u*.24,sy-u*1.15+bob,u*.48,u*.75);
-  ctx.fillStyle='#22382E';
-  ctx.fillRect(sx-u*.18,sy-u*1.08+bob,u*.36,u*.3);
-  ctx.fillStyle='#3B5C4A';
-  ctx.fillRect(sx-u*.24,sy-u*.72+bob,u*.48,u*.07);
+  // ---- Rumpf mit Marschgepäck (Ansicht von hinten) ----
+  ctx.save();
+  ctx.translate(sx,shY); ctx.rotate(roll*.5);
+  ctx.fillStyle=SOL.cloth;
+  ctx.beginPath();
+  ctx.moveTo(-u*.26,0); ctx.lineTo(u*.26,0);
+  ctx.lineTo(u*.21,u*.58); ctx.lineTo(-u*.21,u*.58);
+  ctx.closePath(); ctx.fill();
+  ctx.fillStyle=SOL.clothLt;
+  ctx.fillRect(-u*.28,-u*.05,u*.56,u*.10);          // Schulterpolster
+  ctx.fillStyle=SOL.gear;
+  ctx.fillRect(-u*.19,u*.05,u*.38,u*.40);           // Rucksack
+  if(!lite){
+    ctx.fillStyle=SOL.clothLt;
+    ctx.fillRect(-u*.16,u*.02,u*.32,u*.07);         // Schlafrolle
+    ctx.fillStyle=SOL.clothDk;
+    ctx.fillRect(-u*.19,u*.20,u*.38,u*.05);         // Spanngurt
+    ctx.fillStyle=SOL.gearDk;
+    ctx.fillRect(-u*.02,u*.05,u*.04,u*.40);         // Mittelnaht
+  }
+  ctx.fillStyle=SOL.clothDk;
+  ctx.fillRect(-u*.22,u*.51,u*.44,u*.08);           // Koppel
+  ctx.restore();
 
-  // Kopf mit Helm und Lichtkante
-  ctx.fillStyle='#E7C9A0';
-  ctx.beginPath(); ctx.arc(sx,sy-u*1.32+bob,u*.2,0,6.284); ctx.fill();
-  ctx.fillStyle='#243A2E';
-  ctx.beginPath(); ctx.arc(sx,sy-u*1.38+bob,u*.23,Math.PI,0); ctx.fill();
-  ctx.fillRect(sx-u*.23,sy-u*1.38+bob,u*.46,u*.06);
-  ctx.fillStyle='rgba(245,197,66,.35)';
-  ctx.fillRect(sx-u*.2,sy-u*1.52+bob,u*.26,u*.04);
+  // ---- Waffe: Schaft an der Schulter, Lauf schräg nach vorn ----
+  const rc = flashT>0 ? u*.055 : 0;                  // Rückstoß
+  const bxr=sx+u*.24-rc*.5, byr=shY+u*.16+rc*.6;
+  const mxr=sx+u*.57-rc*.5, myr=shY-u*.45+rc*.6;
+  const gripX=bxr+(mxr-bxr)*.30, gripY=byr+(myr-byr)*.30;
+  const foreX=bxr+(mxr-bxr)*.70, foreY=byr+(myr-byr)*.70;
 
-  const recoil=flashT>0?-u*.06:0;
-  ctx.fillStyle='#1A1F26';
-  ctx.fillRect(sx+u*.08+recoil,sy-u*1.0+bob,u*.52,u*.12);
-  ctx.fillRect(sx+u*.12+recoil,sy-u*.9+bob,u*.1,u*.16);
-  if(first&&flashT>0){
-    const fx=sx+u*.66, fy=sy-u*.94+bob;
-    ctx.fillStyle='rgba(255,233,168,.9)';
+  // hinterer Arm (Abzugshand) liegt unter der Waffe
+  const lsx=sx-u*.19, lsy=shY+u*.05;
+  limbSeg(lsx,lsy,(lsx+gripX)*.5-u*.04,lsy+u*.22,u*.15,u*.12,SOL.clothDk);
+  limbSeg((lsx+gripX)*.5-u*.04,lsy+u*.22,gripX,gripY,u*.12,u*.09,SOL.clothDk);
+
+  limbSeg(bxr,byr,mxr,myr,u*.14,u*.07,SOL.metal);
+  if(!lite){
+    ctx.fillStyle=SOL.metalLt;                       // Magazin
+    ctx.save();
+    ctx.translate(gripX,gripY);
+    ctx.rotate(Math.atan2(myr-byr,mxr-bxr));
+    ctx.fillRect(-u*.03,0,u*.09,u*.18);
+    ctx.restore();
+  }
+
+  // vorderer Arm über der Waffe
+  const rsx=sx+u*.21, rsy=shY+u*.05;
+  limbSeg(rsx,rsy,(rsx+foreX)*.5+u*.09,rsy+u*.17,u*.16,u*.12,SOL.cloth);
+  limbSeg((rsx+foreX)*.5+u*.09,rsy+u*.17,foreX,foreY,u*.12,u*.09,SOL.cloth);
+  ctx.fillStyle=SOL.gear;
+  ctx.beginPath(); ctx.arc(foreX,foreY,u*.065,0,6.284); ctx.fill();
+
+  // ---- Kopf: Nacken, Helmglocke, Lichtkante ----
+  ctx.save();
+  ctx.translate(sx+Math.sin(roll)*u*.05, shY-u*.18);
+  ctx.rotate(-roll*.35);
+  ctx.fillStyle=SOL.nape;
+  ctx.fillRect(-u*.05,-u*.08,u*.10,u*.08);
+  ctx.fillStyle=SOL.helm;
+  ctx.beginPath(); ctx.arc(0,-u*.16,u*.21,Math.PI,6.284); ctx.fill();
+  ctx.fillRect(-u*.21,-u*.17,u*.42,u*.15);
+  if(!lite){
+    ctx.fillStyle='rgba(0,0,0,.3)';
+    ctx.fillRect(-u*.21,-u*.09,u*.42,u*.03);
+  }
+  ctx.fillStyle=SOL.helmLt;
+  ctx.fillRect(-u*.15,-u*.33,u*.19,u*.045);
+  ctx.restore();
+
+  // ---- Mündungsfeuer: der ganze Trupp feuert, der Anführer am hellsten ----
+  if(flashT>0){
+    const k=first?1:.5;
+    const dxr=mxr-bxr, dyr=myr-byr, L=Math.hypot(dxr,dyr)||1;
+    const ux=dxr/L, uy=dyr/L, nx=-uy, ny=ux;
+    const cx=mxr+ux*u*.12*k, cy=myr+uy*u*.12*k;
+    const lo=u*.22*k, sh=u*.085*k;
+    ctx.fillStyle='rgba(255,233,168,'+(first?.92:.55)+')';
     ctx.beginPath();
-    ctx.moveTo(fx,fy);
-    ctx.lineTo(fx+u*.3,fy-u*.12);
-    ctx.lineTo(fx+u*.42,fy);
-    ctx.lineTo(fx+u*.3,fy+u*.12);
+    ctx.moveTo(cx+ux*lo,cy+uy*lo);
+    ctx.lineTo(cx+nx*sh,cy+ny*sh);
+    ctx.lineTo(cx-ux*lo*.45,cy-uy*lo*.45);
+    ctx.lineTo(cx-nx*sh,cy-ny*sh);
     ctx.closePath(); ctx.fill();
-    // Bodenlicht vom Mündungsfeuer
-    const gl=ctx.createRadialGradient(fx,sy,0,fx,sy,u*2.2);
-    gl.addColorStop(0,'rgba(255,220,120,.16)');
-    gl.addColorStop(1,'rgba(255,220,120,0)');
-    ctx.fillStyle=gl;
-    ctx.beginPath(); ctx.ellipse(fx,sy,u*2.2,u*.6,0,0,6.284); ctx.fill();
+    ctx.fillStyle='rgba(255,255,255,'+(first?.9:.5)+')';
+    ctx.beginPath(); ctx.arc(cx,cy,u*.055*k,0,6.284); ctx.fill();
+    if(first){
+      const gl=ctx.createRadialGradient(cx,sy,0,cx,sy,u*2.2);
+      gl.addColorStop(0,'rgba(255,220,120,.16)');
+      gl.addColorStop(1,'rgba(255,220,120,0)');
+      ctx.fillStyle=gl;
+      ctx.beginPath(); ctx.ellipse(cx,sy,u*2.2,u*.6,0,0,6.284); ctx.fill();
+    }
   }
 }
 
@@ -1856,54 +2179,172 @@ function drawBoss(b){
   const s=sc(b.z); if(s<=.02) return;
   const u=PPU*s*3.1*(b.size||1);
   const x=px(b.x,b.z,s), y=py(b.z,s,0);
-  const step=Math.sin(b.ph), sway=Math.sin(b.ph*.5)*.06*u;
   const flash=b.hit>0;
   const body=flash?'#FFF1F0':b.col, head=flash?'#FFFFFF':b.head;
+  const dark=flash?'#FFE3E0':'rgba(0,0,0,.28)';
+
+  // Haltung folgt dem Angriffszustand: Ansturm duckt sich, Ruhe richtet auf
+  const charging = b.kind==='brute'  && b.state==='charge';
+  const sprint   = b.kind==='runner' && b.state==='move';
+  const gait = charging?2.4 : sprint?2.0 : (b.kind==='runner'?1.3:1);
+  const lean = charging?.34 : sprint?.30 : (b.kind==='runner'?.20:.08);
+  const g = b.ph*gait;
+
+  const bob=-Math.abs(Math.sin(g))*.05*u;
+  const hipY=y-u*.72+bob;
+  const shY =y-u*(1.62-lean*.42)+bob;
+  const shX =x+Math.sin(b.ph*.5)*.05*u;
 
   ctx.fillStyle='rgba(0,0,0,.45)';
-  ctx.beginPath(); ctx.ellipse(x,y,u*.6,u*.17,0,0,6.284); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(x,y,u*.62,u*.18,0,0,6.284); ctx.fill();
+  if(charging){                                     // Staub unter dem Ansturm
+    ctx.fillStyle='rgba(200,190,170,.14)';
+    for(let i=0;i<4;i++){
+      const dx=(i-1.5)*u*.42;
+      ctx.beginPath(); ctx.ellipse(x+dx,y-u*.03,u*.15,u*.07,0,0,6.284); ctx.fill();
+    }
+  }
 
-  // Beine
+  // ---- Beine ----
+  for(const side of [-1,1]){
+    const lp=g+(side<0?0:Math.PI);
+    const lift=Math.max(0,Math.sin(lp));
+    const hx=x+side*u*.20, hy=hipY;
+    const fx=x+side*u*.27+side*lift*u*.05;
+    const fy=y-lift*u*.34;
+    const kx=(hx+fx)*.5+side*u*.09;
+    const ky=(hy+fy)*.5-lift*u*.07;
+    limbSeg(hx,hy,kx,ky,u*.32,u*.25,body);
+    limbSeg(kx,ky,fx,fy,u*.25,u*.18,body);
+    ctx.fillStyle='#1A1010';
+    ctx.beginPath(); ctx.ellipse(fx,fy+u*.03,u*.17,u*.09,0,0,6.284); ctx.fill();
+  }
+
+  // ---- Rumpf: Brust breit, Bauch je nach Typ ----
+  const chest = b.kind==='runner'?.40 : b.kind==='brute'?.56 : .48;
+  const waist = b.kind==='spitter'?.52 : b.kind==='queen'?.44 : .34;
+  ctx.save();
+  ctx.translate(shX,shY); ctx.rotate(Math.sin(b.ph*.5)*.05);
   ctx.fillStyle=body;
-  ctx.fillRect(x-u*.28+step*u*.09,y-u*.62,u*.22,u*.62);
-  ctx.fillRect(x+u*.06-step*u*.09,y-u*.62,u*.22,u*.62);
-  // Rumpf
-  ctx.fillRect(x-u*.42+sway,y-u*1.6,u*.84,u*1.05);
-  // Arme
-  const arm=Math.sin(b.ph*1.1)*.07*u;
-  ctx.fillRect(x-u*.86+sway,y-u*1.5+arm,u*.46,u*.24);
-  ctx.fillRect(x+u*.4+sway,y-u*1.5-arm,u*.46,u*.24);
-  ctx.fillStyle=head;
-  ctx.fillRect(x-u*.98+sway,y-u*1.54+arm,u*.18,u*.32);
-  ctx.fillRect(x+u*.82+sway,y-u*1.54-arm,u*.18,u*.32);
-  // Kopf
-  ctx.beginPath(); ctx.arc(x+sway,y-u*1.82,u*.34,0,6.284); ctx.fill();
-  ctx.fillStyle='#E8462B';
-  ctx.fillRect(x-u*.2+sway,y-u*1.9,u*.13,u*.09);
-  ctx.fillRect(x+u*.07+sway,y-u*1.9,u*.13,u*.09);
-  ctx.fillStyle='#1A1010';
-  ctx.fillRect(x-u*.14+sway,y-u*1.7,u*.28,u*.07);
+  ctx.beginPath();
+  ctx.moveTo(-u*chest,0); ctx.lineTo(u*chest,0);
+  ctx.lineTo(u*waist,u*.95); ctx.lineTo(-u*waist,u*.95);
+  ctx.closePath(); ctx.fill();
+  ctx.fillStyle=dark;
+  ctx.fillRect(-u*chest*.7,u*.16,u*chest*1.4,u*.07);   // Brustnaht
+  ctx.restore();
 
-  // typspezifische Silhouette
-  if(b.kind==='queen'){
+  // ---- Arme mit Klauen ----
+  const swing=Math.sin(g*1.05)*.10*u;
+  for(const side of [-1,1]){
+    const sx0=shX+side*u*chest, sy0=shY+u*.10;
+    const dir=side<0?-1:1, sw=side<0?swing:-swing;
+    const reach = charging?.55 : b.kind==='queen'?.50 : .34;
+    const ex=sx0+dir*u*.34, ey=sy0+u*.36-sw;
+    const hx2=ex+dir*u*.14, hy2=ey+u*(.46-reach*.5)+sw*.6;
+    limbSeg(sx0,sy0,ex,ey,u*.26,u*.20,body);
+    limbSeg(ex,ey,hx2,hy2,u*.20,u*.15,head);
     ctx.fillStyle=head;
-    for(let i=-2;i<=2;i++){
+    ctx.beginPath(); ctx.arc(hx2,hy2,u*.11,0,6.284); ctx.fill();
+    ctx.fillStyle='#D9D2C4';
+    for(let k=-1;k<=1;k++){                              // Krallen
       ctx.beginPath();
-      ctx.moveTo(x+sway+i*u*.14,y-u*2.1);
-      ctx.lineTo(x+sway+i*u*.14+u*.05,y-u*2.5);
-      ctx.lineTo(x+sway+i*u*.14+u*.1,y-u*2.1);
+      ctx.moveTo(hx2+k*u*.07-u*.02,hy2+u*.06);
+      ctx.lineTo(hx2+k*u*.07,hy2+u*.22);
+      ctx.lineTo(hx2+k*u*.07+u*.02,hy2+u*.06);
       ctx.closePath(); ctx.fill();
     }
-  }else if(b.kind==='brute'){
+  }
+
+  // ---- Kopf ----
+  const hx3=shX+Math.sin(b.ph*.7)*u*.04, hy3=shY-u*(.30-lean*.30);
+  ctx.save();
+  ctx.translate(hx3,hy3); ctx.rotate(Math.sin(b.ph*.6)*.08+lean*.5);
+  ctx.fillStyle=body; ctx.fillRect(-u*.12,-u*.10,u*.24,u*.18);   // Nacken
+  const hr = b.kind==='brute'?.40 : b.kind==='spitter'?.36 : b.kind==='queen'?.32 : .29;
+  ctx.fillStyle=head;
+  ctx.beginPath(); ctx.arc(0,-u*hr*.85,u*hr,0,6.284); ctx.fill();
+  ctx.fillStyle='#E8462B';
+  ctx.fillRect(-u*hr*.62,-u*hr,u*hr*.39,u*hr*.28);
+  ctx.fillRect( u*hr*.23,-u*hr,u*hr*.39,u*hr*.28);
+  ctx.fillStyle='#1A1010';
+  ctx.beginPath();
+  ctx.moveTo(-u*.16,-u*.14); ctx.lineTo(u*.16,-u*.14);
+  ctx.lineTo(0,u*.04+Math.abs(Math.sin(g))*u*.06);
+  ctx.closePath(); ctx.fill();
+  ctx.restore();
+
+  // ---- Typmerkmale ----
+  if(b.kind==='brute'){
+    // Schulterpanzer und Nackenplatte
     ctx.fillStyle=head;
-    ctx.fillRect(x-u*.5+sway,y-u*1.66,u*1.0,u*.16);
-  }else if(b.kind==='runner'){
-    ctx.strokeStyle='rgba(78,147,168,.5)'; ctx.lineWidth=Math.max(1,2*s);
-    for(let i=1;i<4;i++){
+    ctx.fillRect(shX-u*.72,shY-u*.10,u*1.44,u*.20);
+    ctx.fillStyle=dark;
+    ctx.fillRect(shX-u*.72,shY+u*.06,u*1.44,u*.05);
+    for(const side of [-1,1]){
+      ctx.fillStyle=head;
       ctx.beginPath();
-      ctx.moveTo(x-u*.5,y-u*(.5+i*.35));
-      ctx.lineTo(x-u*(.9+i*.15),y-u*(.4+i*.35));
-      ctx.stroke();
+      ctx.moveTo(shX+side*u*.74,shY-u*.10);
+      ctx.lineTo(shX+side*u*.60,shY-u*.42);
+      ctx.lineTo(shX+side*u*.48,shY-u*.08);
+      ctx.closePath(); ctx.fill();
+    }
+  }else if(b.kind==='spitter'){
+    // Bauchsack und Kehlblase, die sich vor dem Speien füllt
+    const load=Math.min(1,b.st/1.5);
+    ctx.fillStyle=head;
+    ctx.beginPath();
+    ctx.ellipse(shX,shY+u*.78,u*(.50+load*.06),u*(.42+load*.06),0,0,6.284);
+    ctx.fill();
+    ctx.fillStyle='rgba(182,196,82,.45)';
+    ctx.beginPath(); ctx.ellipse(shX-u*.12,shY+u*.68,u*.16,u*.13,0,0,6.284); ctx.fill();
+    ctx.fillStyle=head;
+    ctx.beginPath(); ctx.arc(hx3,hy3+u*.02,u*(.14+load*.14),0,6.284); ctx.fill();
+    if(load>.75){
+      ctx.fillStyle='rgba(182,196,82,'+(.3+load*.4)+')';
+      ctx.beginPath(); ctx.arc(hx3,hy3-u*.34,u*.10,0,6.284); ctx.fill();
+    }
+  }else if(b.kind==='queen'){
+    // Dornenkrone und pochender Eiersack
+    ctx.fillStyle=head;
+    for(let i=-2;i<=2;i++){
+      const hgt=u*(.34+Math.abs(i)*.06);
+      ctx.beginPath();
+      ctx.moveTo(hx3+i*u*.15-u*.05,hy3-u*.60);
+      ctx.lineTo(hx3+i*u*.15,hy3-u*.60-hgt);
+      ctx.lineTo(hx3+i*u*.15+u*.05,hy3-u*.60);
+      ctx.closePath(); ctx.fill();
+    }
+    const pulse=1+Math.sin(b.t*4)*.06;
+    ctx.fillStyle='rgba(154,107,184,.75)';
+    ctx.beginPath(); ctx.ellipse(shX,shY+u*.92,u*.46*pulse,u*.40*pulse,0,0,6.284); ctx.fill();
+    ctx.fillStyle='rgba(220,180,240,.5)';
+    for(let i=0;i<4;i++){
+      const a=b.t*.6+i*1.57;
+      ctx.beginPath();
+      ctx.arc(shX+Math.cos(a)*u*.22,shY+u*.92+Math.sin(a)*u*.18,u*.07,0,6.284);
+      ctx.fill();
+    }
+  }else if(b.kind==='runner'){
+    // Rückenstacheln und Bewegungsspuren
+    ctx.fillStyle=head;
+    for(let i=-2;i<=2;i++){                          // Nackenkamm über den Schultern
+      if(!i) continue;
+      const cx2=shX+i*u*.22, hgt=u*(.34-Math.abs(i)*.07);
+      ctx.beginPath();
+      ctx.moveTo(cx2-u*.07,shY-u*.02);
+      ctx.lineTo(cx2,shY-u*.02-hgt);
+      ctx.lineTo(cx2+u*.07,shY-u*.02);
+      ctx.closePath(); ctx.fill();
+    }
+    if(sprint){
+      ctx.strokeStyle='rgba(78,147,168,.4)'; ctx.lineWidth=Math.max(1,2*s);
+      for(const side of [-1,1]) for(let i=1;i<4;i++){
+        ctx.beginPath();
+        ctx.moveTo(x+side*u*.62,y-u*(.35+i*.34));
+        ctx.lineTo(x+side*u*(1.0+i*.14),y-u*(.28+i*.34));
+        ctx.stroke();
+      }
     }
   }
 }
