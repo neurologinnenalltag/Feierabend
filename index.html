@@ -176,44 +176,73 @@ function px(x,z,s){ return W/2 + x*PPU*s; }
 function py(z,s,h){ return HZ + (BY-HZ)*s - (h||0)*PPU*s; }
 function rnd(a,b){ return a+Math.random()*(b-a); }
 
-// ================================================================ Bestenliste (localStorage)
-const BEST_KEY='bdu-best', LIST_KEY='bdu-scores', NAME_KEY='bdu-name';
+// ================================================================ Bestenliste (global über Supabase, lokal gecacht)
+const BEST_KEY='bdu-best', NAME_KEY='bdu-name', CACHE_KEY='bdu-global-cache';
 const TOP_N=10;
-let best=0, scores=[], pendingIdx=-1;
+const SUPABASE_URL='https://ruyawdmbpqdleejdkyxr.supabase.co';
+const SUPABASE_ANON='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ1eWF3ZG1icHFkbGVlamRreXhyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYxNzAyMjAsImV4cCI6MjEwMTc0NjIyMH0.uNFaKGpEtSksepLt_BkE2pQGaVbRnIIDVNd2Lm4G26M';
+const SB_HEADERS={ apikey:SUPABASE_ANON, Authorization:'Bearer '+SUPABASE_ANON, 'Content-Type':'application/json' };
 
+let best=0, scores=[], pendingIdx=-1, online=null, pendingLocal=null;
+
+// Beim Start sofort den zuletzt bekannten Stand zeigen, im Hintergrund aktualisieren.
+// So steht nie eine leere Liste da, nur weil das Netz gerade lädt.
 function loadScores(){
   try{
-    scores=JSON.parse(localStorage.getItem(LIST_KEY))||[];
-    if(!Array.isArray(scores)) scores=[];
-  }catch(e){ scores=[]; }
-  scores=scores.filter(s=>s&&typeof s.m==='number').sort((a,b)=>b.m-a.m).slice(0,TOP_N);
-  best=scores.length?scores[0].m:0;
-  try{ best=Math.max(best,parseInt(localStorage.getItem(BEST_KEY),10)||0); }catch(e){}
-  elBestH.textContent = best>0 ? 'Best '+best+' m' : '';
-}
-function saveScores(){
-  try{
-    localStorage.setItem(LIST_KEY,JSON.stringify(scores));
-    localStorage.setItem(BEST_KEY,String(best));
+    const cached=JSON.parse(localStorage.getItem(CACHE_KEY));
+    if(Array.isArray(cached)) scores=cached;
   }catch(e){}
+  try{ best=parseInt(localStorage.getItem(BEST_KEY),10)||0; }catch(e){}
+  elBestH.textContent = best>0 ? 'Best '+best+' m' : '';
+  refreshGlobal();
+}
+async function refreshGlobal(){
+  try{
+    const r=await fetch(SUPABASE_URL+'/rest/v1/scores?select=name,meters,created_at&order=meters.desc&limit='+TOP_N,
+      { headers:SB_HEADERS });
+    if(!r.ok) throw new Error('http '+r.status);
+    const rows=await r.json();
+    scores=rows.map(row=>({n:row.name,m:row.meters,t:new Date(row.created_at).getTime()}));
+    online=true;
+    try{ localStorage.setItem(CACHE_KEY,JSON.stringify(scores)); }catch(e){}
+    renderScores();
+  }catch(e){
+    online=false; // Kein Netz oder Server nicht erreichbar - der Cache bleibt sichtbar
+    renderScores();
+  }
 }
 function qualifies(m){
   return m>0 && (scores.length<TOP_N || m>scores[scores.length-1].m);
 }
-// Dopplungen sind ausdrücklich erlaubt: gleicher Name darf mehrfach in der Liste stehen
-function addScore(name,m){
-  const entry={n:(name||'ANONYM').slice(0,12).toUpperCase(),m:m,t:Date.now()};
+async function addScore(name,m){
+  const nm=(name||'ANONYM').slice(0,12).toUpperCase();
+  const entry={n:nm,m:m,t:Date.now()};
+  // Optimistisch sofort anzeigen, danach mit dem Server abgleichen
   scores.push(entry);
   scores.sort((a,b)=> b.m-a.m || a.t-b.t);
   scores=scores.slice(0,TOP_N);
   pendingIdx=scores.indexOf(entry);
   best=Math.max(best,m);
-  saveScores();
+  try{ localStorage.setItem(BEST_KEY,String(best)); }catch(e){}
   elBestH.textContent='Best '+best+' m';
+  renderScores();
+  try{
+    const r=await fetch(SUPABASE_URL+'/rest/v1/scores', {
+      method:'POST', headers:{...SB_HEADERS, Prefer:'return=minimal'},
+      body:JSON.stringify([{ name:nm, meters:m }])
+    });
+    if(!r.ok) throw new Error('http '+r.status);
+    online=true;
+    await refreshGlobal();
+  }catch(e){
+    online=false;
+    pendingLocal=entry; // wird beim naechsten erfolgreichen Start erneut versucht
+  }
 }
 function renderScores(){
   if(!scores.length){ listTitleEl.hidden=true; listEl.hidden=true; return; }
   listTitleEl.hidden=false; listEl.hidden=false;
+  listTitleEl.textContent = online===false ? 'Top 10 · Offline (zuletzt bekannt)' : 'Top 10 · Weltweit';
   listEl.innerHTML='';
   scores.forEach((s,i)=>{
     const li=document.createElement('li');
@@ -232,7 +261,6 @@ function submitScore(){
   addScore(nm,pendingScore);
   pendingScore=-1;
   nameBox.hidden=true;
-  renderScores();
 }
 let pendingScore=-1;
 
@@ -2651,7 +2679,7 @@ nameIn.addEventListener('keydown',e=>{
 // Test-Hook für Balancing (beeinflusst das Spiel nicht)
 try{ window.__bdu={ get:()=>({squad,dist,squadX,pressure,zombies,boss,state,gates,crates,traps,weap}), aim:v=>{targetX=Math.max(-ROAD+1,Math.min(ROAD-1,v));} }; }catch(e){}
 
-resize(); reset(); loadScores(); renderScores(); listEl.hidden=!scores.length; listTitleEl.hidden=!scores.length;
+resize(); reset(); loadScores(); renderScores();
 requestAnimationFrame(loop);
 })();
 </script>
