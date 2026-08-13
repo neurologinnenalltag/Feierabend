@@ -127,7 +127,8 @@
       <span class="bad">Rote Tore nicht beschießen</span> – sie zünden im eigenen Trupp.
       Zombies fressen sich fest, solange sie hängen steht ihr still.
       <span class="bad">Stacheln töten jeden, der darüberläuft.</span>
-      Kristalle geben kurze Boni, neue Waffen ab 1000 m.
+      Kristalle geben kurze Boni. <b>Bosse kündigen ihren Angriff an</b> – rechtzeitig
+      ausweichen verhindert Schaden.
     </p>
     <button class="cta" id="btn">Losrennen</button>
    </div>
@@ -176,8 +177,21 @@ function px(x,z,s){ return W/2 + x*PPU*s; }
 function py(z,s,h){ return HZ + (BY-HZ)*s - (h||0)*PPU*s; }
 function rnd(a,b){ return a+Math.random()*(b-a); }
 
+// Schwierigkeitskurve ueber die Distanz: zuerst ein normaler Anstieg, dann eine
+// bewusste Verschnaufpause (die neuen Waffen werden gerade erst eingesammelt),
+// danach ab 9000 m ein ungedeckelter, spuerbar steiler Wiederanstieg.
+function difficultyMul(){
+  const d=dist;
+  let m;
+  if(d<3000)      m=1 + (d/3000)*0.5;                       // 1.0 -> 1.5
+  else if(d<6000) m=1.5 - ((d-3000)/3000)*0.7;               // 1.5 -> 0.8 Entspannung
+  else if(d<9000) m=0.8;                                     // ruhiges Plateau
+  else            m=0.8 + Math.pow((d-9000)/6000,1.6)*2.6;   // steiler Spaetanstieg, offen nach oben
+  return Math.max(0.5,m);
+}
+
 // ================================================================ Bestenliste (global über Supabase, lokal gecacht)
-const BEST_KEY='bdu-best', NAME_KEY='bdu-name', CACHE_KEY='bdu-global-cache';
+const BEST_KEY='bdu-best-s2', NAME_KEY='bdu-name', CACHE_KEY='bdu-global-cache-s2';
 const TOP_N=10;
 const SUPABASE_URL='https://ruyawdmbpqdleejdkyxr.supabase.co';
 const SUPABASE_ANON='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ1eWF3ZG1icHFkbGVlamRreXhyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYxNzAyMjAsImV4cCI6MjEwMTc0NjIyMH0.uNFaKGpEtSksepLt_BkE2pQGaVbRnIIDVNd2Lm4G26M';
@@ -346,6 +360,13 @@ const SFX = {
     if(t-lastTickSnd<.12)return; lastTickSnd=t;
     noise(t,.12,.14,'bandpass',2600);
   },
+  telegraph(){ if(!AC)return; const t=AC.currentTime;
+    tone('sine',420,900,t,.22,.09);
+  },
+  spore(){ if(!AC)return; const t=AC.currentTime;
+    noise(t,.4,.16,'bandpass',1200);
+    tone('sawtooth',260,90,t,.3,.12);
+  },
   flame(){ if(!AC)return; const t=AC.currentTime;
     noise(t,.5,.12,'lowpass',1100);
   },
@@ -399,7 +420,7 @@ const WEAPONS = [
 ];
 
 // ================================================================ State
-const SQUAD_CAP=99, GATE_GAIN_CAP=20;
+const SQUAD_CAP=25, GATE_GAIN_CAP=8, RED_LOSS_CAP=16;
 const MAX_STRAFE=6.2;      // maximale Seitwärtsgeschwindigkeit in Metern/Sekunde
 // Boss-Typen: jeder hat ein eigenes Angriffsmuster
 const BOSSES=[
@@ -432,19 +453,20 @@ const BIOMES=[
     lamp:'200,220,180', sky:['#070B0A','#12201C','#263A34'], fog:'110,140,120',
     mark:false, surface:'grass',  towers:'none',  edge:'fence',  light:'none',    reflect:false },
 ];
-const WEAPON_START=1000;   // ab hier gibt es überhaupt neue Waffenklassen
+const WEAPON_START=1000;
+const RAILGUN_START=10000; // letzte Waffenklasse bleibt bis dahin gesperrt   // ab hier gibt es überhaupt neue Waffenklassen
 
 let state='menu';
 let squad, weap, dist, speed, squadX, targetX, shake, fireT, flashT, pressure, overrunT;
 let zombies, bullets, gates, crates, parts, floats, dying, decals, clouds, fallen, casings;
-let traps, boss, bossShots, bossIdx, nextBoss, warnT, pups, buffs, nextPup, biome, sectorT;
+let traps, boss, bossShots, bossZones, bossIdx, nextBoss, warnT, pups, buffs, nextPup, biome, sectorT;
 let nextGate, nextWave, nextCrate, nextTrap;
 
 function reset(){
   squad=1; weap=0; dist=0; speed=15; pressure=1; overrunT=0;
   squadX=0; targetX=0; shake=0; fireT=0; flashT=0;
   zombies=[]; bullets=[]; gates=[]; crates=[]; parts=[]; floats=[]; dying=[]; decals=[]; fallen=[]; casings=[];
-  traps=[]; boss=null; bossShots=[]; bossIdx=0; nextBoss=1200; warnT=0;
+  traps=[]; boss=null; bossShots=[]; bossZones=[]; bossIdx=0; nextBoss=1200; warnT=0;
   pups=[]; buffs={}; nextPup=150; biome=0; sectorT=0; sky=null;
   clouds=[]; for(let i=0;i<4;i++) clouds.push({x:rnd(0,1),y:rnd(.02,.16),w:rnd(.2,.4),v:rnd(.004,.012)});
   nextGate=5; nextWave=135; nextCrate=WEAPON_START; nextTrap=250;
@@ -490,7 +512,7 @@ function makePanel(good, tier){
   // Rote Tore sind stark gepanzert: Streufeuer allein zündet sie nicht,
   // aber wer draufhält, jagt sich die Ladung selbst in den Trupp.
   if(Math.random()<.32) return { op:'/', v:2, hits:0, need:Math.round(48*af), good:false };
-  const v=Math.round(rnd(6,12+tier*3));
+  const v=Math.min(RED_LOSS_CAP, Math.round(rnd(6,10+tier*2)));
   return { op:'-', v:v, hits:0, need:Math.round((22+v*3)*af), good:false };
 }
 function spawnGate(){
@@ -524,21 +546,22 @@ function spawnGate(){
 }
 let zid=0;
 function spawnWave(){
-  const n=Math.min(42, 4+Math.floor(dist/108));
-  const hp=1+Math.floor(dist/240);
+  const dm=difficultyMul(), spd=Math.sqrt(dm);
+  const n=Math.min(70, Math.round((4+dist/108)*dm));
+  const hp=Math.max(1, Math.round((1+dist/240)*dm));
   for(let i=0;i<n;i++){
     zombies.push({
       id:++zid,
       x:rnd(-ROAD+.6,ROAD-.6),
       z:SPAWN_Z+rnd(0,14)+Math.floor(i/6)*2.6,
-      hp:hp,max:hp,big:false,sp:rnd(3.2,5.2),ph:Math.random()*6.28,hit:0,feed:0,
+      hp:hp,max:hp,big:false,sp:rnd(3.2,5.2)*spd,ph:Math.random()*6.28,hit:0,feed:0,
       wob:Math.random()*6.28, wobA:rnd(.6,2.0), drift:rnd(-.5,.5),
       offN:rnd(-1,1), anchor:rnd(.9,2.0)
     });
   }
   if(dist>700 && Math.random()<.35){
-    const bh=18+Math.floor(dist/60);
-    zombies.push({id:++zid,x:rnd(-3,3),z:SPAWN_Z+8,hp:bh,max:bh,big:true,sp:2.0,ph:0,hit:0,feed:0,wob:Math.random()*6.28,wobA:.5,drift:0,offN:rnd(-.45,.45),anchor:rnd(1.0,1.6)});
+    const bh=Math.round((18+dist/60)*dm);
+    zombies.push({id:++zid,x:rnd(-3,3),z:SPAWN_Z+8,hp:bh,max:bh,big:true,sp:2.0*spd,ph:0,hit:0,feed:0,wob:Math.random()*6.28,wobA:.5,drift:0,offN:rnd(-.45,.45),anchor:rnd(1.0,1.6)});
     SFX.boss();
   }
 }
@@ -577,10 +600,17 @@ function spawnBoss(){
   // Je 1000 Meter legt ein Boss 10 % an Größe und Lebenspunkten zu
   const g=Math.pow(1.1, dist/1000);
   const hp=Math.round((b.hpF + dist/b.hpD*10) * g);
+  // Angriffstempo je Bosstyp: alle haben einen eigenen, angekündigten Angriff,
+  // der sich durch seitliches Ausweichen vermeiden lässt.
+  const atkCd0 = b.kind==='brute' ? rnd(2.6,3.4)
+               : b.kind==='runner' ? rnd(1.4,2.0)
+               : b.kind==='queen' ? rnd(3.0,3.8)
+               : rnd(1.2,1.8);
   boss={
     kind:b.kind, name:b.name, col:b.col, head:b.head,
     size:Math.min(2.8,g), stage:bossIdx,
-    x:0, z:52, hp:hp, max:hp, t:0, atk:2, state:'move', st:0, hit:0, ph:0
+    x:0, z:52, hp:hp, max:hp, t:0, atk:2, state:'move', st:0, hit:0, ph:0,
+    tele:false, teleT:0, teleX:0, lockX:0, atkCd:atkCd0
   };
   warnT=2.2;
   SFX.bossRoar();
@@ -611,12 +641,18 @@ function update(dt){
   }
   overrunT=Math.max(0,overrunT-dt);
 
+  const dmNow=difficultyMul();
   if(dist>nextGate){ spawnGate(); nextGate+=rnd(100,150); }
-  if(dist>nextWave){ spawnWave(); nextWave+=Math.max(24, rnd(55,80)-dist/30) * (boss?1.8:1); }
-  if(dist>WEAPON_START && dist>nextCrate && weap<WEAPONS.length-1){ spawnCrate(); nextCrate+=rnd(420,560); }
+  if(dist>nextWave){ spawnWave(); nextWave+=Math.max(16, (rnd(55,80)-dist/30)/dmNow) * (boss?1.8:1); }
+  if(dist>WEAPON_START && dist>nextCrate && weap<WEAPONS.length-1){
+    // Letzte Waffe (Railgun) bleibt bis RAILGUN_START gesperrt, egal wie viele Kisten schon warten
+    const nextIsRailgun = weap===WEAPONS.length-2;
+    if(!nextIsRailgun || dist>=RAILGUN_START){ spawnCrate(); nextCrate+=rnd(420,560); }
+    else{ nextCrate=RAILGUN_START; }
+  }
   if(dist>nextPup){ spawnPup(); nextPup+= dist<WEAPON_START ? rnd(115,170) : rnd(190,265); }
-  if(dist>nextTrap){ spawnTrap(); nextTrap+=Math.max(55, rnd(115,165)-dist/30); }
-  if(dist>nextBoss && !boss){ spawnBoss(); nextBoss+=rnd(780,980); }
+  if(dist>nextTrap){ spawnTrap(); nextTrap+=Math.max(30, (rnd(115,165)-dist/30)/dmNow); }
+  if(dist>nextBoss && !boss){ spawnBoss(); nextBoss+=Math.max(480, rnd(780,980)/Math.sqrt(dmNow)); }
   warnT=Math.max(0,warnT-dt);
   sectorT=Math.max(0,sectorT-dt);
 
@@ -972,7 +1008,7 @@ function killBoss(){
 }
 
 function updateBoss(dt){
-  // Boss-Projektile
+  // Boss-Projektile (Speier)
   for(let i=bossShots.length-1;i>=0;i--){
     const s=bossShots[i];
     s.z-=(28+speed*.2)*dt; s.x+=s.vx*dt; s.ph+=dt*9;
@@ -982,44 +1018,128 @@ function updateBoss(dt){
     }
     if(Math.abs(s.x)>ROAD+1) bossShots.splice(i,1);
   }
+  // Bodenzonen (Sporenwolke der Brutmutter): wachsen an, treffen erst am Ende -
+  // wer den markierten Bereich rechtzeitig verlässt, kommt unbeschadet davon
+  for(let i=bossZones.length-1;i>=0;i--){
+    const z=bossZones[i];
+    z.t-=dt;
+    if(!z.done && z.t<=0){
+      z.done=true;
+      if(Math.abs(squadX-z.x)<z.r1){ hurtSquad(z.dmg,squadX,'SPORENWOLKE'); }
+      for(let k=0;k<16;k++) parts.push({x:z.x+rnd(-z.r1,z.r1),z:z.z+rnd(-.6,.6),t:rnd(.25,.55),r:rnd(.2,.6),c:'#B98CE0',kind:'flash'});
+    }
+    if(z.done && z.t<-.35) bossZones.splice(i,1);
+  }
   if(!boss) return;
 
   const b=boss;
   b.t+=dt; b.st+=dt; b.ph+=dt*6;
   b.hit=Math.max(0,b.hit-dt);
-  // seitliches Ausweichen plus Drift zum Trupp
-  b.x += Math.sin(b.t*1.2)*1.6*dt + Math.sign(squadX-b.x)*Math.min(Math.abs(squadX-b.x),1.1)*dt;
-  b.x = Math.max(-ROAD+1, Math.min(ROAD-1, b.x));
 
-  let approach = 1.6;   // Meter pro Sekunde, mit denen der Boss aufschließt
+  // Der Speier ist ein Fernkaempfer und soll auf Distanz bleiben statt in
+  // Nahkampfreichweite zu laufen - dort waere ihr Schuss praktisch Punktleere
+  let approach = b.kind==='spitter' ? 0.35 : 1.6;
+  let frozen = false;   // waehrend Ankuendigung/Ausfuehrung eines Angriffs kein Nachlenken
 
   if(b.kind==='brute'){
-    if(b.state==='move' && b.st>3.4){ b.state='charge'; b.st=0; SFX.bossRoar(); }
-    if(b.state==='charge'){ approach=18; if(b.st>1.1){ b.state='move'; b.st=0; } }
+    // Ankuendigung: er stemmt sich auf, Ziel wird jetzt festgelegt - danach nicht mehr
+    if(b.state==='move'){
+      if(!b.tele){
+        b.atkCd-=dt;
+        if(b.atkCd<=0){ b.tele=true; b.teleT=.65; b.teleX=squadX; SFX.telegraph(); }
+      }else{
+        frozen=true; approach=0; b.teleT-=dt;
+        if(b.teleT<=0){ b.tele=false; b.state='charge'; b.st=0; b.lockX=b.teleX; SFX.bossRoar(); }
+      }
+    }
+    if(b.state==='charge'){
+      frozen=true; approach=18;
+      if(b.st>1.1){ b.state='move'; b.st=0; b.atkCd=rnd(2.6,3.4); }
+    }
   }else if(b.kind==='runner'){
-    approach = b.state==='move' ? 3.4 : 1;
-    if(b.st>1.8){ b.state = b.state==='move'?'rest':'move'; b.st=0; }
+    if(b.state==='rest'){
+      if(!b.tele){
+        approach=1;
+        b.atkCd-=dt;
+        if(b.atkCd<=0){ b.tele=true; b.teleT=.4; b.teleX=squadX; SFX.telegraph(); }
+      }else{
+        frozen=true; approach=0; b.teleT-=dt;
+        if(b.teleT<=0){ b.tele=false; b.state='move'; b.st=0; b.lockX=b.teleX; }
+      }
+    }else{
+      frozen=true; approach=3.6;
+      if(b.st>1.3){ b.state='rest'; b.st=0; b.atkCd=rnd(1.4,2.0); }
+    }
   }else if(b.kind==='spitter'){
-    if(b.st>1.5){
-      b.st=0; SFX.spit();
-      for(let k=-1;k<=1;k+=2)
-        bossShots.push({x:b.x, z:b.z-1, vx:k*rnd(.4,1.6)+ (squadX-b.x)*.05, ph:0});
+    // Der Cooldown startet erst NACH dem Schuss, nicht schon bei der Ankuendigung -
+    // sonst laeuft die Erholungszeit waehrend Zielen+Flugzeit schon mit und es bleibt
+    // praktisch keine Pause, um von einer Kante zur anderen auszuweichen
+    if(!b.tele){
+      if(b.st>2.4){ b.tele=true; b.teleT=.4; b.teleX=squadX; SFX.telegraph(); }
+    }else{
+      // Zielverfolgung eingefroren, waehrend sie zielt - der Schuss startet von hier,
+      // ohne dem Spieler bis zur letzten Millisekunde zu folgen
+      frozen=true; approach=0; b.teleT-=dt;
+      if(b.teleT<=0){
+        b.tele=false; b.st=0; SFX.spit();
+        // Enges Paar statt breiter Streuung ueber die ganze Strasse - so ist
+        // "weg vom markierten Punkt" ein verlaesslicher, klarer Ausweg
+        for(let k=-1;k<=1;k+=2)
+          bossShots.push({x:b.x, z:b.z-1, vx:k*rnd(.3,.7), ph:0});
+      }
     }
   }else if(b.kind==='queen'){
+    // Bestehendes Verhalten: ruft regelmäßig Verstärkung
     if(b.st>3.0){
       b.st=0; SFX.bossRoar();
       for(let k=0;k<3;k++)
         zombies.push({id:++zid,x:b.x+rnd(-2,2),z:b.z-1.5,hp:2,max:2,big:false,sp:rnd(4,5.5),ph:Math.random()*6.28,hit:0,feed:0,wob:Math.random()*6.28,wobA:1.2,drift:rnd(-.4,.4),offN:rnd(-.9,.9),anchor:rnd(.9,1.9)});
     }
+    // Neu: eigener direkter Angriff - eine ausweichbare Sporenwolke am Boden
+    if(!b.tele){
+      b.atkCd-=dt;
+      if(b.atkCd<=0){ b.tele=true; b.teleT=.9; b.teleX=squadX; SFX.telegraph(); }
+    }else{
+      frozen=true; approach=0; b.teleT-=dt;
+      if(b.teleT<=0){
+        b.tele=false; b.atkCd=rnd(3.2,4.2); SFX.spore();
+        bossZones.push({x:b.teleX,z:1.3,r1:2.6,t:.5,dmg:3,done:false});
+      }
+    }
+  }
+
+  // seitliches Ausweichen plus Drift zum Trupp - eingefroren waehrend Ankuendigung/Angriff.
+  // Der Speier folgt dabei nur sehr sacht: sonst wandert er ueber viele Zyklen zur
+  // bevorzugten Ausweichseite des Spielers und macht seine Schuesse vorhersehbar.
+  if(!frozen){
+    // Der Speier hat KEINE gerichtete Nachfuehrung: sonst wandert sie ueber sehr
+    // viele Zyklen zur bevorzugten Ausweichseite des Spielers und ihre Schuesse
+    // werden am Ende vorhersehbar. Nur das Schweben bleibt fuer etwas Leben.
+    const homeSpeed = b.kind==='spitter' ? 0 : 1.1;
+    b.x += Math.sin(b.t*1.2)*1.6*dt + Math.sign(squadX-b.x)*Math.min(Math.abs(squadX-b.x),homeSpeed)*dt;
+    b.x = Math.max(-ROAD+1, Math.min(ROAD-1, b.x));
+  }else if(b.state==='charge' || (b.kind==='runner'&&b.state==='move')){
+    b.x = b.lockX; // Ansturm folgt der beim Ankuendigen festgelegten Spur, nicht mehr dem Spieler
   }
 
   b.z -= approach*dt;
 
-  // Erreicht der Boss die Linie, kostet das schwer - danach wird er zurückgeworfen
-  if(b.z<1.2+1.0*(b.size||1)){
-    hurtSquad(Math.min(squad-1, Math.max(3, Math.min(Math.round(squad*.45), Math.round(14*(b.size||1))))), squadX, 'ÜBERROLLT');
-    b.z=26; b.state='move'; b.st=0;
-    shake=.55;
+  // Erreicht der Boss die Linie: nur ein Treffer, wenn er den Trupp dabei auch
+  // wirklich seitlich erwischt - wer rechtzeitig zur Seite geht, kommt vorbei
+  const lineZ = 1.2+1.0*(b.size||1);
+  if(b.z<lineZ){
+    const hitR = 2.6+1.3*(b.size||1);
+    if(Math.abs(b.x-squadX)<hitR){
+      hurtSquad(Math.min(squad-1, Math.max(3, Math.min(Math.round(squad*.45), Math.round(14*(b.size||1))))), squadX, 'ÜBERROLLT');
+      shake=.55;
+    }else{
+      shake=Math.max(shake,.18); // knapp daneben - spuerbar, aber kein Schaden
+    }
+    b.z=26; b.state='move'; b.st=0; b.tele=false;
+    // Frischer Angriffs-Cooldown, egal ob der Ansturm getroffen oder verfehlt hat -
+    // sonst würde sofort der nächste Angriff auf dieselbe Ausweichposition folgen
+    if(b.kind==='brute') b.atkCd=rnd(2.6,3.4);
+    else if(b.kind==='runner') b.atkCd=rnd(1.4,2.0);
     if(squad<=0) return;
   }
 
@@ -2203,12 +2323,32 @@ function drawBossShot(s0){
   ctx.beginPath(); ctx.ellipse(x,y,u*.3,u*.36+Math.sin(s0.ph)*u*.05,0,0,6.284); ctx.fill();
 }
 
+function drawBossZone(z){
+  const s=sc(z.z); if(s<=.02) return;
+  const x=px(z.x,z.z,s), y=py(z.z,s,0);
+  const p=Math.max(0,Math.min(1, 1-z.t/.5));   // fuellt sich, waehrend die Zeit ablaeuft
+  if(!z.done){
+    ctx.strokeStyle='rgba(185,140,224,'+(.35+p*.5)+')'; ctx.lineWidth=Math.max(1.5,3*s);
+    ctx.beginPath(); ctx.ellipse(x,y,z.r1*PPU*s,z.r1*.32*PPU*s,0,0,6.284*p); ctx.stroke();
+    ctx.fillStyle='rgba(185,140,224,'+(.10+p*.18)+')';
+    ctx.beginPath(); ctx.ellipse(x,y,z.r1*PPU*s,z.r1*.32*PPU*s,0,0,6.284); ctx.fill();
+  }else{
+    const fade=Math.max(0,1+z.t/.35);
+    ctx.globalAlpha=fade;
+    ctx.fillStyle='rgba(214,184,255,.5)';
+    ctx.beginPath(); ctx.ellipse(x,y,z.r1*PPU*s*1.1,z.r1*.36*PPU*s,0,0,6.284); ctx.fill();
+    ctx.globalAlpha=1;
+  }
+}
+
 function drawBoss(b){
   const s=sc(b.z); if(s<=.02) return;
   const u=PPU*s*3.1*(b.size||1);
   const x=px(b.x,b.z,s), y=py(b.z,s,0);
   const flash=b.hit>0;
-  const body=flash?'#FFF1F0':b.col, head=flash?'#FFFFFF':b.head;
+  const teleGlow=b.tele && (Math.sin(tAcc*16)>-.2);
+  const body=flash?'#FFF1F0':teleGlow?'#FFD9A0':b.col;
+  const head=flash?'#FFFFFF':teleGlow?'#FFEFC7':b.head;
   const dark=flash?'#FFE3E0':'rgba(0,0,0,.28)';
 
   // Haltung folgt dem Angriffszustand: Ansturm duckt sich, Ruhe richtet auf
@@ -2543,6 +2683,7 @@ function render(t){
   for(const dy of dying) items.push({z:dy.z,d:()=>drawDying(dy)});
   for(const f of fallen) items.push({z:f.z,d:()=>drawFallen(f)});
   for(const s0 of bossShots) items.push({z:s0.z,d:()=>drawBossShot(s0)});
+  for(const z0 of bossZones) items.push({z:z0.z,d:()=>drawBossZone(z0)});
   if(boss) items.push({z:boss.z,d:()=>drawBoss(boss)});
   items.sort((a,b)=>b.z-a.z);
   for(const it of items) it.d();
