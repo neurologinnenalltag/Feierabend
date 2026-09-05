@@ -29,6 +29,20 @@
   #weapon{font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:rgba(237,242,247,.72);margin-top:3px;}
   #bestHud{font-size:10px;font-family:ui-monospace,Menlo,monospace;color:rgba(237,242,247,.45);margin-top:3px;}
 
+  /* ---- Bewegungs-Joystick (links) und Ziel-Joystick (rechts) ---- */
+  #moveBase, #aimBase{position:absolute;width:104px;height:104px;margin:-52px 0 0 -52px;border-radius:50%;
+    background:rgba(11,14,19,.35);border:2px solid rgba(245,197,66,.4);display:none;pointer-events:none;
+    box-shadow:0 0 18px rgba(0,0,0,.35) inset;}
+  #moveBase{border-color:rgba(86,227,159,.45);}
+  #moveKnob, #aimKnob{position:absolute;width:46px;height:46px;margin:-23px 0 0 -23px;border-radius:50%;
+    background:rgba(245,197,66,.55);border:2px solid rgba(245,197,66,.85);pointer-events:none;
+    box-shadow:0 0 10px rgba(245,197,66,.5);}
+  #moveKnob{background:rgba(86,227,159,.55);border-color:rgba(86,227,159,.85);box-shadow:0 0 10px rgba(86,227,159,.5);}
+  #moveHint, #aimHint{position:absolute;bottom:70px;pointer-events:none;font-size:9px;letter-spacing:.18em;
+    text-transform:uppercase;color:rgba(237,242,247,.4);text-align:right;}
+  #moveHint{left:14px;text-align:left;}
+  #aimHint{right:14px;}
+
   #mute{position:absolute;right:12px;bottom:12px;pointer-events:auto;background:rgba(11,14,19,.55);
     border:1px solid rgba(237,242,247,.2);color:rgba(237,242,247,.75);border-radius:2px;
     font-size:10px;letter-spacing:.2em;text-transform:uppercase;padding:8px 12px;cursor:pointer;}
@@ -104,6 +118,10 @@
     </div>
   </div>
 
+  <div id="moveBase"><div id="moveKnob"></div></div>
+  <div id="moveHint">LINKS HALTEN<br>ZUM BEWEGEN</div>
+  <div id="aimBase"><div id="aimKnob"></div></div>
+  <div id="aimHint">RECHTS HALTEN<br>ZUM FEUERN</div>
   <button id="mute" aria-label="Ton umschalten">Ton an</button>
 
   <div id="screen">
@@ -122,7 +140,8 @@
     <div class="listTitle" id="listTitle" hidden>Top 10</div>
     <ol id="scoreList" hidden></ol>
     <p class="rules" id="rules">
-      Finger oder Maus steuert den Trupp, geschossen wird automatisch.<br><br>
+      <b>Links halten</b> bewegt den Trupp – Auslenkung bestimmt Tempo und Richtung.
+      <b>Rechts halten</b> feuert, solange gedrückt; Auslenkung zielt seitlich.<br><br>
       <b>Grüne Tore freischießen</b> für Verstärkung.
       <span class="bad">Rote Tore nicht beschießen</span> – sie zünden im eigenen Trupp.
       Zombies fressen sich fest, solange sie hängen steht ihr still.
@@ -457,14 +476,14 @@ const WEAPON_START=1000;
 const RAILGUN_START=10000; // letzte Waffenklasse bleibt bis dahin gesperrt   // ab hier gibt es überhaupt neue Waffenklassen
 
 let state='menu';
-let squad, weap, dist, speed, squadX, targetX, shake, fireT, flashT, pressure, overrunT;
+let squad, weap, dist, speed, squadX, shake, fireT, flashT, pressure, overrunT;
 let zombies, bullets, gates, crates, parts, floats, dying, decals, clouds, fallen, casings;
 let traps, boss, bossShots, bossZones, bossIdx, nextBoss, warnT, pups, buffs, nextPup, biome, sectorT;
 let nextGate, nextWave, nextCrate, nextTrap;
 
 function reset(){
   squad=1; weap=0; dist=0; speed=15; pressure=1; overrunT=0;
-  squadX=0; targetX=0; shake=0; fireT=0; flashT=0;
+  squadX=0; shake=0; fireT=0; flashT=0;
   zombies=[]; bullets=[]; gates=[]; crates=[]; parts=[]; floats=[]; dying=[]; decals=[]; fallen=[]; casings=[];
   traps=[]; boss=null; bossShots=[]; bossZones=[]; bossIdx=0; nextBoss=1200; warnT=0;
   pups=[]; buffs={}; nextPup=150; biome=0; sectorT=0; sky=null;
@@ -479,17 +498,83 @@ function syncHud(){
 }
 
 // ================================================================ Eingabe
-let pointerDown=false;
-function toWorldX(cx){ const r=cvs.getBoundingClientRect(); return (cx-r.left-W/2)/PPU; }
-function moveTo(cx){ targetX=Math.max(-ROAD+1,Math.min(ROAD-1,toWorldX(cx))); }
-cvs.addEventListener('pointerdown',e=>{pointerDown=true;cvs.setPointerCapture(e.pointerId);moveTo(e.clientX);});
-cvs.addEventListener('pointermove',e=>{if(pointerDown)moveTo(e.clientX);});
-cvs.addEventListener('pointerup',()=>pointerDown=false);
-cvs.addEventListener('pointercancel',()=>pointerDown=false);
+// Zwei gleichartige Joysticks: links bewegt, rechts zielt+feuert. Welche
+// Bildschirmhaelfte eine Beruehrung startet, entscheidet dauerhaft ihre Rolle,
+// auch wenn der Finger spaeter in die andere Haelfte wandert.
+const STICK_RADIUS=52, MOVE_MAX_VX=MAX_STRAFE, AIM_MAX_VX=22;
+let moveTouchId=null, aimTouchId=null;
+let moveActive=false, moveVX=0;
+let aimActive=false;
+const moveBaseEl=document.getElementById('moveBase'), moveKnobEl=document.getElementById('moveKnob');
+const aimBaseEl=document.getElementById('aimBase'), aimKnobEl=document.getElementById('aimKnob');
+const moveHintEl=document.getElementById('moveHint'), aimHintEl=document.getElementById('aimHint');
+
+function zoneOf(clientX){ const r=cvs.getBoundingClientRect(); return (clientX-r.left) < r.width*0.5 ? 'move':'aim'; }
+
+function stickStart(clientX,clientY,baseEl){
+  const r=cvs.getBoundingClientRect();
+  const bx=clientX-r.left, by=clientY-r.top;
+  baseEl.style.display='block'; baseEl.style.left=bx+'px'; baseEl.style.top=by+'px';
+  return {bx,by};
+}
+function stickDeflect(clientX,clientY,base,knobEl){
+  const r=cvs.getBoundingClientRect();
+  let dx=(clientX-r.left)-base.bx, dy=(clientY-r.top)-base.by;
+  const d=Math.hypot(dx,dy);
+  if(d>STICK_RADIUS){ dx*=STICK_RADIUS/d; dy*=STICK_RADIUS/d; }
+  knobEl.style.left=(base.bx+dx)+'px'; knobEl.style.top=(base.by+dy)+'px';
+  return {x:dx/STICK_RADIUS, y:dy/STICK_RADIUS};   // je -1..1
+}
+
+let moveBase={bx:0,by:0}, aimBase={bx:0,by:0};
+
+function moveStart(cx,cy){ moveBase=stickStart(cx,cy,moveBaseEl); moveActive=true; moveVX=0; moveHintEl.style.display='none'; }
+function moveMove(cx,cy){ moveVX=stickDeflect(cx,cy,moveBase,moveKnobEl).x*MOVE_MAX_VX; }
+function moveEnd(){ moveActive=false; moveVX=0; moveBaseEl.style.display='none'; }
+
+// Der Ziel-Joystick liefert einen echten Winkel, keinen kleinen Bias: "geradeaus" (Stick
+// nach oben) feuert wie bisher nach vorn, volle Auslenkung zur Seite feuert quer zur Fahrbahn.
+const AIM_MAX_ANGLE=1.55;   // ca. 89 Grad - fast, aber nicht ganz seitlich, damit Vorwaertstempo > 0 bleibt
+let aimAngle=0;
+function aimStart(cx,cy){ aimBase=stickStart(cx,cy,aimBaseEl); aimActive=true; aimAngle=0; aimHintEl.style.display='none'; }
+const AIM_DEADZONE=.22;
+function aimMove(cx,cy){
+  const d=stickDeflect(cx,cy,aimBase,aimKnobEl);
+  const mag=Math.hypot(d.x,d.y);
+  if(mag>AIM_DEADZONE){
+    // atan2(x,-y): Stick nach oben (y negativ) = 0 Grad = geradeaus; nach rechts = positiv.
+    // Die Auslenkungsstaerke jenseits der Totzone skaliert den Winkel - eine leichte
+    // seitliche Beruehrung gibt also nur einen leichten Winkel, nicht sofort 90 Grad.
+    const raw=Math.atan2(d.x,-d.y);
+    const strength=Math.min(1,(mag-AIM_DEADZONE)/(1-AIM_DEADZONE));
+    aimAngle=Math.max(-AIM_MAX_ANGLE,Math.min(AIM_MAX_ANGLE,raw*strength));
+  }
+}
+function aimEnd(){ aimActive=false; aimAngle=0; aimBaseEl.style.display='none'; }
+
+cvs.addEventListener('pointerdown',e=>{
+  const zone=zoneOf(e.clientX);
+  if(zone==='move' && moveTouchId===null){
+    moveTouchId=e.pointerId; cvs.setPointerCapture(e.pointerId); moveStart(e.clientX,e.clientY);
+  }else if(zone==='aim' && aimTouchId===null){
+    aimTouchId=e.pointerId; cvs.setPointerCapture(e.pointerId); aimStart(e.clientX,e.clientY);
+  }
+});
+cvs.addEventListener('pointermove',e=>{
+  if(e.pointerId===moveTouchId) moveMove(e.clientX,e.clientY);
+  else if(e.pointerId===aimTouchId) aimMove(e.clientX,e.clientY);
+});
+function endPointer(e){
+  if(e.pointerId===moveTouchId){ moveTouchId=null; moveEnd(); }
+  if(e.pointerId===aimTouchId){ aimTouchId=null; aimEnd(); }
+}
+cvs.addEventListener('pointerup',endPointer);
+cvs.addEventListener('pointercancel',endPointer);
 const keys={};
 addEventListener('keydown',e=>{
   if(e.target&&e.target.tagName==='INPUT') return;
   keys[e.key]=true;
+  if(e.key===' ') e.preventDefault();   // Leertaste feuert statt die Seite zu scrollen
   if((e.key===' '||e.key==='Enter')&&state!=='play'){e.preventDefault();start();}
 });
 addEventListener('keyup',e=>keys[e.key]=false);
@@ -631,14 +716,11 @@ function update(dt){
   speed = base*pressure;
   dist += speed*dt;
 
-  // ---- Seitwärts: gedeckelte Höchstgeschwindigkeit statt sofortigem Springen ----
-  if(keys.ArrowLeft||keys.a) targetX=Math.max(-ROAD+1,targetX-MAX_STRAFE*dt);
-  if(keys.ArrowRight||keys.d) targetX=Math.min(ROAD-1,targetX+MAX_STRAFE*dt);
-  const dx=targetX-squadX;
-  if(Math.abs(dx)>.001){
-    const step=Math.min(Math.abs(dx), MAX_STRAFE*dt);
-    squadX += Math.sign(dx)*step;
-  }
+  // ---- Seitwärts: Joystick-Auslenkung ODER Pfeiltasten steuern direkt die Geschwindigkeit ----
+  let mvx = moveActive ? moveVX : 0;
+  if(keys.ArrowLeft||keys.a) mvx = -MAX_STRAFE;
+  if(keys.ArrowRight||keys.d) mvx = MAX_STRAFE;
+  squadX = Math.max(-ROAD+1, Math.min(ROAD-1, squadX + mvx*dt));
   overrunT=Math.max(0,overrunT-dt);
 
   const dmNow=difficultyMul();
@@ -662,8 +744,10 @@ function update(dt){
   const bDmg  = buffs.dmg?2:1;
   const bSpread = !!buffs.spread;
   const bPierce = !!buffs.pierce;
+  // Feuern nur, solange der Ziel-Joystick gehalten wird (oder am Desktop: Leertaste)
+  const firing = aimActive || !!keys[' '];
   fireT-=dt;
-  if(fireT<=0 && squad>0){
+  if(fireT<=0 && squad>0 && firing){
     fireT=w.rate*bRate; flashT=.05;
     SFX.shot();
     const pos=formation();
@@ -682,11 +766,17 @@ function update(dt){
       const sp0=pos[Math.min(pos.length-1, Math.round(i*stride))];
       const pellets=w.pellets+(bSpread?2:0);
       const spr=bSpread?Math.max(w.spread,2.4):w.spread;
+      // Der Zielwinkel teilt die volle Muendungsgeschwindigkeit in Vorwaerts- und
+      // Seitwaertsanteil auf - bei starker Auslenkung fliegen die Kugeln quer zur Fahrbahn
+      // statt nur leicht schraeg nach vorn. Waffenstreuung bleibt ein additiver Seitwaertsjitter.
+      const totalSp=w.speed||72;
+      const ang=aimActive?aimAngle:0;
+      const baseVx=totalSp*Math.sin(ang), baseSp=totalSp*Math.cos(ang);
       for(let p=0;p<pellets;p++){
         bullets.push({
           x:sp0[0], z:.5+sp0[1], dmg:w.dmg*bDmg, col:bDmg>1?'#FFB03A':w.color,
-          vx:spr?rnd(-spr,spr):0,
-          sp:w.speed||72, pierce:!!w.pierce||bPierce, splash:w.splash||0,
+          vx:baseVx+(spr?rnd(-spr,spr):0),
+          sp:baseSp, pierce:!!w.pierce||bPierce, splash:w.splash||0,
           range:w.range||0, glow:w.glow||'255,220,120', hitIds:null
         });
       }
@@ -2707,6 +2797,20 @@ function render(t){
 
   const pos=formation();
   for(let i=0;i<pos.length;i++) drawSoldier(pos[i][0],pos[i][1],t,i===0);
+  if(aimActive && pos.length){
+    // Dezente Ziellinie: feste Laenge entlang der tatsaechlichen Schussrichtung,
+    // funktioniert auch bei fast seitlichem Zielen (statt einer festen Vorwaertsdistanz)
+    const LEN=7;
+    const dirX=Math.sin(aimAngle), dirZ=Math.cos(aimAngle);
+    const s0=sc(pos[0][1]+.5);
+    const x0=px(pos[0][0],pos[0][1]+.5,s0), y0=py(pos[0][1]+.5,s0,.9);
+    const tz=Math.max(0,pos[0][1]+.5+dirZ*LEN);
+    const ts=sc(tz);
+    const x1=px(pos[0][0]+dirX*LEN,tz,ts), y1=py(tz,ts,.9);
+    ctx.strokeStyle='rgba(245,197,66,.35)'; ctx.lineWidth=1.5; ctx.setLineDash([4,4]);
+    ctx.beginPath(); ctx.moveTo(x0,y0); ctx.lineTo(x1,y1); ctx.stroke();
+    ctx.setLineDash([]);
+  }
 
   for(const p of parts){
     const s=sc(p.z); if(s<=.02) continue;
@@ -2818,7 +2922,7 @@ nameIn.addEventListener('keydown',e=>{
 });
 
 // Test-Hook für Balancing (beeinflusst das Spiel nicht)
-try{ window.__bdu={ get:()=>({squad,dist,squadX,pressure,zombies,boss,state,gates,crates,traps,weap}), aim:v=>{targetX=Math.max(-ROAD+1,Math.min(ROAD-1,v));} }; }catch(e){}
+try{ window.__bdu={ get:()=>({squad,dist,squadX,pressure,zombies,boss,state,gates,crates,traps,weap}), aim:v=>{ const c=Math.max(-ROAD+1,Math.min(ROAD-1,v)); moveActive=true; moveVX=Math.sign(c-squadX)*MOVE_MAX_VX*Math.min(1,Math.abs(c-squadX)*3); }, setFiring:v=>{aimActive=v;aimAngle=0;} }; }catch(e){}
 
 resize(); reset(); loadScores(); renderScores();
 requestAnimationFrame(loop);
